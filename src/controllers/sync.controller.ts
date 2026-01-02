@@ -57,6 +57,7 @@ export class SyncController {
             created: result.fase1.created,
             updated: result.fase1.updated,
             filtered: result.fase1.filtered,
+            archived: result.fase1.archived || 0,
             errors: result.fase1.errors
           },
           fase2: {
@@ -113,6 +114,7 @@ export class SyncController {
               created: result.fase1.created,
               updated: result.fase1.updated,
               filtered: result.fase1.filtered,
+              archived: result.fase1.archived || 0,
               errors: result.fase1.errors
             },
             images: {
@@ -170,7 +172,7 @@ export class SyncController {
 
       const duration = Math.round((Date.now() - startTime) / 1000); // segundos
 
-      logger.info(`Sync manual completada en ${duration}s - Procesados: ${result.fase1.processed}, Creados: ${result.fase1.created}, Actualizados: ${result.fase1.updated}, Filtrados: ${result.fase1.filtered}, Errores: ${result.fase1.errors}`);
+      logger.info(`Sync manual completada en ${duration}s - Procesados: ${result.fase1.processed}, Creados: ${result.fase1.created}, Actualizados: ${result.fase1.updated}, Filtrados: ${result.fase1.filtered}, Archivados: ${result.fase1.archived || 0}, Errores: ${result.fase1.errors}`);
 
       res.json({
         success: true,
@@ -184,6 +186,7 @@ export class SyncController {
               created: result.fase1.created,
               updated: result.fase1.updated,
               filtered: result.fase1.filtered,
+              archived: result.fase1.archived || 0,
               errors: result.fase1.errors
             },
             images: {

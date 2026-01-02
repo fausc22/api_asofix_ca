@@ -703,7 +703,7 @@ class SyncService {
     incremental: boolean = false,
     syncType: 'full' | 'incremental' | 'manual' = 'incremental'
   ): Promise<{ 
-    fase1: { processed: number; created: number; updated: number; errors: number; filtered: number }; 
+    fase1: { processed: number; created: number; updated: number; errors: number; filtered: number; archived: number }; 
     fase2: { processed: number; created: number; errors: number } 
   }> {
     // Registrar inicio en sync_logs (opcional, no falla si no existe)
@@ -722,9 +722,14 @@ class SyncService {
     let fase1Updated = 0;
     let fase1Errors = 0;
     let fase1Filtered = 0;
+    let fase1Archived = 0; // Vehículos archivados en fase de limpieza global
     let fase2Processed = 0;
     let fase2Created = 0;
     let fase2Errors = 0;
+
+    // Set para trackear vehículos válidos durante la sincronización
+    // Equivalente a $all_api_ids en cleanup_phase_cron() del PHP
+    const validVehicleIds = new Set<string>();
 
     // ========== FASE 1: Sincronización de Datos ==========
     onProgress?.('fase1', '🚀 Iniciando Fase 1: Sincronización de datos...', { current: 0, total: 0, percentage: 0 });
@@ -789,6 +794,17 @@ class SyncService {
             percentage: totalVehicles > 0 ? Math.round((fase1Processed / totalVehicles) * 100) : 0 
           });
 
+          // Ejecutar shouldOmitVehicle para construir Set de vehículos válidos
+          // Equivalente a validate_vehicle_rules() en cleanup_phase_cron() del PHP
+          const { omit } = VehicleFilters.shouldOmitVehicle(vehicle);
+          
+          // Si omit === false, el vehículo es válido para publicar
+          // Agregarlo al Set de vehículos válidos (equivalente a agregar a $all_api_ids en PHP)
+          if (!omit && asofixId && asofixId !== 'ID_DESCONOCIDO') {
+            validVehicleIds.add(asofixId);
+          }
+
+          // Procesar el vehículo (lógica existente: crear/actualizar/archivar según corresponda)
           const result = await this.processVehicle(vehicle, incremental);
 
           if (result.success) {
@@ -844,7 +860,102 @@ class SyncService {
       }
     }
 
-    onProgress?.('fase1', `🎉 Fase 1 completada. ${fase1Processed} vehículos procesados (${fase1Created} nuevos, ${fase1Updated} actualizados, ${fase1Filtered} filtrados), ${fase1Errors} errores.`, { 
+    onProgress?.('fase1', `✅ Fase 1 completada. ${fase1Processed} vehículos procesados (${fase1Created} nuevos, ${fase1Updated} actualizados, ${fase1Filtered} filtrados), ${fase1Errors} errores.`, { 
+      current: fase1Processed, 
+      total: fase1Processed, 
+      percentage: 95 
+    });
+
+    // ========== FASE 1.5: Limpieza Global (equivalente a cleanup_phase_cron() en PHP) ==========
+    onProgress?.('fase1', `🧹 Iniciando fase de limpieza global: archivando vehículos publicados que no están en el set de válidos...`, { 
+      current: fase1Processed, 
+      total: fase1Processed, 
+      percentage: 96 
+    });
+
+    logger.info(`[Cleanup] Vehículos válidos detectados en esta sincronización: ${validVehicleIds.size}`);
+
+    try {
+      if (validVehicleIds.size > 0) {
+        // Construir lista de IDs válidos para la query SQL
+        const validIdsArray = Array.from(validVehicleIds);
+        const placeholders = validIdsArray.map(() => '?').join(',');
+
+        // Buscar vehículos publicados que NO están en el Set de válidos
+        // Equivalente a la query que busca posts publicados en cleanup_phase_cron() del PHP
+        const [publishedVehicles] = await pool.execute<any[]>(
+          `SELECT id, asofix_id, title 
+           FROM vehicles 
+           WHERE status = 'published'
+             AND asofix_id NOT IN (${placeholders})
+           LIMIT 10000`,
+          validIdsArray
+        );
+
+        if (publishedVehicles.length > 0) {
+          logger.info(`[Cleanup] Encontrados ${publishedVehicles.length} vehículos publicados que no están en el set de válidos. Archivando...`);
+
+          for (const vehicle of publishedVehicles) {
+            try {
+              // Obtener additional_data actual para preservar y agregar motivo de archivado
+              const [existingRows] = await pool.execute<any[]>(
+                'SELECT additional_data FROM vehicles WHERE id = ?',
+                [vehicle.id]
+              );
+
+              let additionalData: any = {};
+              try {
+                additionalData = existingRows[0]?.additional_data ? JSON.parse(existingRows[0].additional_data) : {};
+              } catch (e) {
+                // Si hay error parseando, usar objeto vacío
+              }
+
+              additionalData.filter_reason = 'not_in_valid_set';
+              additionalData.archived_at = new Date().toISOString();
+
+              await pool.execute(
+                'UPDATE vehicles SET status = ?, additional_data = ?, updated_at = NOW() WHERE id = ?',
+                ['archived', JSON.stringify(additionalData), vehicle.id]
+              );
+
+              fase1Archived++;
+              logger.warn(`[Cleanup] Vehículo ${vehicle.asofix_id} (${vehicle.title}) archivado: no está presente en el set de vehículos válidos de la API`);
+            } catch (error: any) {
+              logger.error(`[Cleanup] Error al archivar vehículo ${vehicle.asofix_id}: ${error.message}`);
+            }
+          }
+
+          onProgress?.('fase1', `🧹 Limpieza global completada: ${fase1Archived} vehículos archivados.`, { 
+            current: fase1Processed, 
+            total: fase1Processed, 
+            percentage: 98 
+          });
+        } else {
+          logger.info(`[Cleanup] No se encontraron vehículos publicados para archivar.`);
+          onProgress?.('fase1', `✅ Limpieza global: no se encontraron vehículos para archivar.`, { 
+            current: fase1Processed, 
+            total: fase1Processed, 
+            percentage: 98 
+          });
+        }
+      } else {
+        logger.warn(`[Cleanup] No se encontraron vehículos válidos en la sincronización. Saltando limpieza para evitar archivar todos los vehículos.`);
+        onProgress?.('fase1', `⚠️  Limpieza global omitida: no se encontraron vehículos válidos.`, { 
+          current: fase1Processed, 
+          total: fase1Processed, 
+          percentage: 98 
+        });
+      }
+    } catch (error: any) {
+      logger.error(`[Cleanup] Error en fase de limpieza global: ${error.message}`);
+      onProgress?.('fase1', `❌ Error en limpieza global: ${error.message}`, { 
+        current: fase1Processed, 
+        total: fase1Processed, 
+        percentage: 98 
+      });
+    }
+
+    onProgress?.('fase1', `🎉 Fase 1 completada. ${fase1Processed} vehículos procesados (${fase1Created} nuevos, ${fase1Updated} actualizados, ${fase1Filtered} filtrados, ${fase1Archived} archivados en limpieza), ${fase1Errors} errores.`, { 
       current: fase1Processed, 
       total: fase1Processed, 
       percentage: 100 
@@ -918,7 +1029,14 @@ class SyncService {
     }
 
     return {
-      fase1: { processed: fase1Processed, created: fase1Created, updated: fase1Updated, errors: fase1Errors, filtered: fase1Filtered },
+      fase1: { 
+        processed: fase1Processed, 
+        created: fase1Created, 
+        updated: fase1Updated, 
+        errors: fase1Errors, 
+        filtered: fase1Filtered,
+        archived: fase1Archived
+      },
       fase2: { processed: fase2Processed, created: fase2Created, errors: fase2Errors }
     };
   }
