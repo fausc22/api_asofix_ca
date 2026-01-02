@@ -180,8 +180,15 @@ class SyncService {
 
   /**
    * Genera un hash de versión para detectar cambios en un vehículo
+   * Incluye URLs de imágenes ordenadas para detectar cambios en el set de imágenes
    */
   private generateVersionHash(vehicle: AsofixVehicle): string {
+    // Ordenar URLs de imágenes para comparación consistente
+    const imageUrls = (vehicle.images || [])
+      .map(img => img.url || '')
+      .filter(url => url)
+      .sort();
+    
     const relevantData = {
       id: vehicle.id,
       title: `${vehicle.brand_name || ''} ${vehicle.model_name || ''} ${vehicle.version || ''}`.trim(),
@@ -196,7 +203,8 @@ class SyncService {
       segment: vehicle.car_segment,
       color: vehicle.colors?.[0]?.name || '',
       license_plate: vehicle.license_plate,
-      images_count: (vehicle.images || []).length,
+      images_urls: imageUrls, // URLs ordenadas para detectar cambios
+      images_count: imageUrls.length,
       stock_status: vehicle.stocks?.find(s => s.status?.toUpperCase() === 'ACTIVO')?.status || ''
     };
     
@@ -245,21 +253,84 @@ class SyncService {
 
     // APLICAR FILTROS OBLIGATORIOS
     const { omit, reason } = VehicleFilters.shouldOmitVehicle(vehicle);
+    const existingId = await this.findVehicleByAsofixId(asofixId);
+    
     if (omit) {
-      // Si el vehículo ya existe en la BD pero ahora debe ser filtrado, marcarlo como archived
-      const existingId = await this.findVehicleByAsofixId(asofixId);
+      // Vehículo debe ser filtrado: archivar si existe
       if (existingId) {
         try {
-          await pool.execute(
-            'UPDATE vehicles SET status = ? WHERE id = ?',
-            ['archived', existingId]
+          // Obtener additional_data actual para preservar y agregar filter_reason
+          const [existingRows] = await pool.execute<any[]>(
+            'SELECT additional_data FROM vehicles WHERE id = ?',
+            [existingId]
           );
-          logger.info(`Vehículo ${asofixId} archivado por filtro: ${reason}`);
+          
+          let additionalData: any = {};
+          try {
+            additionalData = existingRows[0]?.additional_data ? JSON.parse(existingRows[0].additional_data) : {};
+          } catch (e) {
+            // Si hay error parseando, usar objeto vacío
+          }
+          
+          // Determinar filter_reason basado en la razón
+          let filterReason = 'unknown';
+          if (reason?.toLowerCase().includes('dakota') || reason?.toLowerCase().includes('location_name')) {
+            filterReason = 'dakota_location';
+          } else if (reason?.toLowerCase().includes('precio')) {
+            filterReason = 'min_price';
+          } else if (reason?.toLowerCase().includes('estado')) {
+            filterReason = 'blocked_status';
+          } else if (reason?.toLowerCase().includes('imagen')) {
+            filterReason = 'no_images';
+          } else if (reason?.toLowerCase().includes('stock')) {
+            filterReason = 'no_active_stock';
+          }
+          
+          additionalData.filter_reason = filterReason;
+          
+          await pool.execute(
+            'UPDATE vehicles SET status = ?, additional_data = ?, updated_at = NOW() WHERE id = ?',
+            ['archived', JSON.stringify(additionalData), existingId]
+          );
+          logger.warn(`Vehículo ${asofixId} archivado por filtro: ${reason}`);
         } catch (error: any) {
-          logger.error(`Error al archivar vehículo: ${error.message}`);
+          logger.error(`Error al archivar vehículo ${asofixId}: ${error.message}`);
         }
       }
       return { success: true, message: `FILTRADO: ${reason}`, filtered: true };
+    } else {
+      // Vehículo NO debe ser filtrado: reactivar si estaba archivado
+      if (existingId) {
+        try {
+          // Verificar si está archivado
+          const [statusRows] = await pool.execute<any[]>(
+            'SELECT status, additional_data FROM vehicles WHERE id = ?',
+            [existingId]
+          );
+          
+          if (statusRows[0]?.status === 'archived') {
+            // Remover filter_reason del additional_data si existe
+            let additionalData: any = {};
+            try {
+              additionalData = statusRows[0]?.additional_data ? JSON.parse(statusRows[0].additional_data) : {};
+            } catch (e) {
+              // Si hay error parseando, usar objeto vacío
+            }
+            
+            if (additionalData.filter_reason) {
+              delete additionalData.filter_reason;
+            }
+            
+            await pool.execute(
+              'UPDATE vehicles SET status = ?, additional_data = ?, updated_at = NOW() WHERE id = ?',
+              ['published', JSON.stringify(additionalData), existingId]
+            );
+            logger.info(`Vehículo ${asofixId} reactivado (ya no cumple filtros de exclusión)`);
+          }
+        } catch (error: any) {
+          logger.error(`Error al reactivar vehículo ${asofixId}: ${error.message}`);
+        }
+      }
     }
 
     // Generar hash de versión para detectar cambios
@@ -326,8 +397,45 @@ class SyncService {
         );
         vehicleId = existingId;
 
-        // Eliminar imágenes anteriores (se volverán a descargar si hay cambios)
-        await pool.execute('DELETE FROM vehicle_images WHERE vehicle_id = ?', [vehicleId]);
+        // LÓGICA IDEMPOTENTE: Comparar URLs antes de eliminar imágenes
+        const newImageUrls = (vehicle.images || []).map(img => img.url || '').filter(url => url);
+        
+        // Obtener URLs de imágenes existentes
+        const [existingImages] = await pool.execute<any[]>(
+          'SELECT image_url FROM vehicle_images WHERE vehicle_id = ?',
+          [vehicleId]
+        );
+        const existingUrls = existingImages.map((img: any) => img.image_url).filter((url: string) => url);
+        
+        // Convertir a Sets para comparación eficiente
+        const newUrlsSet = new Set(newImageUrls);
+        const existingUrlsSet = new Set(existingUrls);
+        
+        // Encontrar URLs que deben eliminarse (existen en BD pero no en nueva data)
+        const urlsToDelete = existingUrls.filter(url => !newUrlsSet.has(url));
+        
+        // Encontrar URLs que deben agregarse (existen en nueva data pero no en BD)
+        const urlsToAdd = newImageUrls.filter(url => !existingUrlsSet.has(url));
+        
+        // Eliminar solo las imágenes que ya no están en la nueva lista
+        if (urlsToDelete.length > 0) {
+          // MySQL requiere placeholders individuales para IN clause
+          const placeholders = urlsToDelete.map(() => '?').join(',');
+          await pool.execute(
+            `DELETE FROM vehicle_images WHERE vehicle_id = ? AND image_url IN (${placeholders})`,
+            [vehicleId, ...urlsToDelete]
+          );
+          logger.info(`Eliminadas ${urlsToDelete.length} imágenes obsoletas para vehículo ${vehicleId}`);
+        }
+        
+        // Solo guardar URLs nuevas en pending_images (las existentes no se vuelven a descargar)
+        if (urlsToAdd.length > 0) {
+          await this.savePendingImages(vehicleId, urlsToAdd);
+          logger.info(`Agregadas ${urlsToAdd.length} nuevas URLs a pending_images para vehículo ${vehicleId}`);
+        } else {
+          // Si no hay URLs nuevas, limpiar pending_images para este vehículo
+          await pool.execute('DELETE FROM pending_images WHERE vehicle_id = ?', [vehicleId]);
+        }
       } else {
         // Crear nuevo vehículo
         const [result] = await pool.execute<any>(
@@ -345,9 +453,11 @@ class SyncService {
       // Establecer metadatos
       await this.setVehicleMetadata(vehicleId, vehicle);
 
-      // Guardar URLs de imágenes pendientes
+      // Guardar URLs de imágenes pendientes (solo si es vehículo nuevo)
+      if (wasNew) {
       const imageUrls = (vehicle.images || []).map(img => img.url || '').filter(url => url);
       await this.savePendingImages(vehicleId, imageUrls);
+      }
 
       return {
         success: true,
@@ -381,13 +491,38 @@ class SyncService {
 
   /**
    * Descarga y guarda una imagen
+   * Proceso idempotente: verifica si la imagen ya existe antes de insertar
    */
   async downloadImage(imageUrl: string, vehicleId: number): Promise<{ success: boolean; message: string; imageId?: number }> {
     try {
+      // Verificar si la imagen ya existe (proceso idempotente)
+      const [existingImage] = await pool.execute<any[]>(
+        'SELECT id FROM vehicle_images WHERE vehicle_id = ? AND image_url = ? LIMIT 1',
+        [vehicleId, imageUrl]
+      );
+
+      // Si ya existe, retornar éxito sin descargar ni insertar
+      if (existingImage && existingImage.length > 0) {
+        const existingImageId = existingImage[0].id;
+        
+        // Eliminar de pendientes (por si acaso)
+        await pool.execute(
+          'DELETE FROM pending_images WHERE vehicle_id = ? AND image_url = ?',
+          [vehicleId, imageUrl]
+        );
+
+        return {
+          success: true,
+          message: `Imagen ya existe para vehículo ${vehicleId}`,
+          imageId: existingImageId
+        };
+      }
+
       const highResUrl = imageUrl.replace('/th-', '/');
 
-      const uploadPath = process.env.UPLOAD_PATH || './uploads';
-      const vehicleDir = path.join(uploadPath, 'vehicles', String(vehicleId));
+      // Usar IMAGES_PATH si está configurado, sino UPLOAD_PATH, sino default
+      const imagesPath = process.env.IMAGES_PATH || process.env.UPLOAD_PATH || './uploads';
+      const vehicleDir = path.join(imagesPath, 'autos', String(vehicleId));
       if (!fs.existsSync(vehicleDir)) {
         fs.mkdirSync(vehicleDir, { recursive: true });
       }
@@ -443,28 +578,26 @@ class SyncService {
   }
 
   /**
-   * Sincroniza una página de vehículos aplicando filtros obligatorios
+   * Sincroniza una página de vehículos
+   * IMPORTANTE: NO filtra por stock ACTIVO aquí - deja que processVehicle maneje todos los vehículos
+   * para que pueda archivar correctamente los que ya no están activos/reservados/eliminados
    */
   async syncPage(page: number): Promise<{ vehicles: AsofixVehicle[]; hasMore: boolean }> {
     try {
       const response = await asofixApi.getVehiclesPage(page);
       const allVehicles = response.data || [];
 
-      // Filtrar solo vehículos activos
-      const activeVehicles = allVehicles.filter(vehicle => {
-        if (!vehicle.stocks || vehicle.stocks.length === 0) return false;
-        return vehicle.stocks.some(stock => 
-          stock.status && stock.status.toUpperCase() === 'ACTIVO'
-        );
-      });
-
-      // APLICAR FILTROS OBLIGATORIOS
-      const { filtered } = VehicleFilters.filterVehicles(activeVehicles);
-
+      // NO filtrar por stock ACTIVO aquí - processVehicle manejará todos los vehículos
+      // Esto permite archivar vehículos que pasaron de activos a reservados/eliminados
+      // APLICAR SOLO FILTROS DE NEGOCIO (no stock activo)
+      // Nota: VehicleFilters.filterVehicles aplicará shouldOmitVehicle que verifica stock activo,
+      // pero processVehicle necesita recibir TODOS los vehículos para poder archivarlos correctamente
+      
+      // Retornar TODOS los vehículos - processVehicle aplicará los filtros y archivará los omitidos
       const meta = response.meta;
-      const hasMore = meta ? (meta.current_page || 0) < (meta.total_pages || 0) : filtered.length > 0;
+      const hasMore = meta ? (meta.current_page || 0) < (meta.total_pages || 0) : allVehicles.length > 0;
 
-      return { vehicles: filtered, hasMore };
+      return { vehicles: allVehicles, hasMore };
     } catch (error: any) {
       logger.error(`Error al sincronizar página ${page}: ${error.message}`);
       throw error;
@@ -567,11 +700,20 @@ class SyncService {
    */
   async syncAll(
     onProgress?: (phase: 'fase1' | 'fase2', message: string, progress: { current: number; total: number; percentage: number }) => void,
-    incremental: boolean = false
+    incremental: boolean = false,
+    syncType: 'full' | 'incremental' | 'manual' = 'incremental'
   ): Promise<{ 
     fase1: { processed: number; created: number; updated: number; errors: number; filtered: number }; 
     fase2: { processed: number; created: number; errors: number } 
   }> {
+    // Registrar inicio en sync_logs (opcional, no falla si no existe)
+    let syncLogId: number | null = null;
+    try {
+      const { SyncLogger } = await import('./sync-logger');
+      syncLogId = await SyncLogger.logSyncStart(syncType);
+    } catch (error) {
+      // No fallar si sync-logger no está disponible
+    }
     const limit = parseInt(process.env.SYNC_LIMIT || '0');
     const delay = parseInt(process.env.SYNC_IMAGE_DELAY || '0');
     
@@ -698,6 +840,7 @@ class SyncService {
         });
         fase1Errors++;
         hasMore = false;
+        logger.error(`Error al procesar página ${currentPage} de sync: ${error.message}`);
       }
     }
 
@@ -746,6 +889,32 @@ class SyncService {
         percentage: 0 
       });
       fase2Errors++;
+    }
+
+    // Registrar finalización en sync_logs
+    try {
+      const { SyncLogger } = await import('./sync-logger');
+      if (fase1Errors === 0 && fase2Errors === 0) {
+        await SyncLogger.logSyncComplete(syncLogId, {
+          vehicles_processed: fase1Processed,
+          vehicles_created: fase1Created,
+          vehicles_updated: fase1Updated,
+          images_processed: fase2Processed,
+          images_created: fase2Created,
+          errors_count: fase1Errors + fase2Errors
+        });
+      } else {
+        await SyncLogger.logSyncFailed(
+          syncLogId,
+          `Sync completada con errores: ${fase1Errors} errores en fase1, ${fase2Errors} errores en fase2`,
+          {
+            vehicles_processed: fase1Processed,
+            errors_count: fase1Errors + fase2Errors
+          }
+        );
+      }
+    } catch (error) {
+      // No fallar si sync-logger no está disponible
     }
 
     return {

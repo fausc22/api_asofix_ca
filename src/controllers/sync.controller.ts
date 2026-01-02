@@ -46,7 +46,7 @@ export class SyncController {
           },
           timestamp: new Date().toISOString()
         });
-      }, false); // incremental = false para carga inicial completa
+      }, false, 'full'); // incremental = false para carga inicial completa, syncType = 'full'
 
       sendEvent({
         type: 'complete',
@@ -88,14 +88,20 @@ export class SyncController {
    */
   static async syncCron(req: Request, res: Response) {
     try {
-      logger.info('🔄 Iniciando sincronización incremental (cron)...');
+      logger.info('Sync cron iniciado (incremental)');
 
       const result = await syncService.syncAll(
         (phase, message, progress) => {
-          logger.info(`[${phase.toUpperCase()}] ${message} (${progress.percentage}%)`);
+          // Logs detallados solo en desarrollo, resumen en producción
+          if (process.env.NODE_ENV === 'development') {
+            logger.info(`[${phase.toUpperCase()}] ${message} (${progress.percentage}%)`);
+          }
         },
-        true // incremental = true
+        true, // incremental = true
+        'incremental' // syncType
       );
+
+      logger.info(`Sync cron completada - Procesados: ${result.fase1.processed}, Creados: ${result.fase1.created}, Actualizados: ${result.fase1.updated}, Filtrados: ${result.fase1.filtered}, Errores: ${result.fase1.errors}`);
 
       res.json({
         success: true,
@@ -119,7 +125,7 @@ export class SyncController {
         }
       });
     } catch (error: any) {
-      logger.error(`Error en sincronización cron: ${error.message}`);
+      logger.error(`Error en sync cron: ${error.message}`);
       res.status(500).json({ 
         success: false, 
         message: error.message 
@@ -140,7 +146,7 @@ export class SyncController {
       if (syncToken) {
         const providedToken = req.headers['x-sync-token'] || req.body.token;
         if (providedToken !== syncToken) {
-          logger.warn('Intento de sincronización manual sin token válido');
+          logger.warn('Intento de sync manual sin token válido');
           return res.status(401).json({
             success: false,
             message: 'Token de autorización requerido para sincronización manual'
@@ -148,19 +154,23 @@ export class SyncController {
         }
       }
 
-      logger.info('🔄 Iniciando sincronización manual (on-demand)...');
+      logger.info('Sync manual iniciado (on-demand)');
 
       const startTime = Date.now();
       const result = await syncService.syncAll(
         (phase, message, progress) => {
-          logger.info(`[${phase.toUpperCase()}] ${message} (${progress.percentage}%)`);
+          // Logs detallados solo en desarrollo, resumen en producción
+          if (process.env.NODE_ENV === 'development') {
+            logger.info(`[${phase.toUpperCase()}] ${message} (${progress.percentage}%)`);
+          }
         },
-        true // incremental = true (misma lógica que cron)
+        true, // incremental = true (misma lógica que cron)
+        'manual' // syncType
       );
 
       const duration = Math.round((Date.now() - startTime) / 1000); // segundos
 
-      logger.info(`✅ Sincronización manual completada en ${duration}s`);
+      logger.info(`Sync manual completada en ${duration}s - Procesados: ${result.fase1.processed}, Creados: ${result.fase1.created}, Actualizados: ${result.fase1.updated}, Filtrados: ${result.fase1.filtered}, Errores: ${result.fase1.errors}`);
 
       res.json({
         success: true,
@@ -186,7 +196,7 @@ export class SyncController {
         }
       });
     } catch (error: any) {
-      logger.error(`Error en sincronización manual: ${error.message}`);
+      logger.error(`Error en sync manual: ${error.message}`);
       res.status(500).json({
         success: false,
         message: error.message,

@@ -111,18 +111,12 @@ class AsofixApi {
         const responseData = error.response?.data;
         
         if (status === 401) {
-          logger.error('Error 401: No autorizado. Verifica que tu API Key sea correcta.');
-          logger.error(`API Key usada: ${this.apiKey.substring(0, 5)}...${this.apiKey.substring(this.apiKey.length - 5)}`);
-          logger.error(`Respuesta del servidor: ${JSON.stringify(responseData)}`);
+          logger.error(`Error API externa ASOFIX - Status: 401, Mensaje: No autorizado (API Key inválida)`);
           throw new Error('Error 401: API Key inválida o no autorizada. Verifica tu API Key en el archivo .env');
         }
         
-        logger.error(`Error en la API de Asofix: ${error.message}`, {
-          status,
-          statusText,
-          responseData,
-          url: error.config?.url
-        });
+        // Log estructurado para errores HTTP
+        logger.error(`Error API externa ASOFIX - Status: ${status}, Endpoint: ${error.config?.url || 'unknown'}, Mensaje: ${error.message}`);
         throw new Error(`Error en la API de Asofix: ${error.message} (Status: ${status})`);
       }
       throw error;

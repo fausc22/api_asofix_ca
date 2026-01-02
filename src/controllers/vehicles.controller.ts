@@ -66,18 +66,23 @@ export class VehiclesController {
       whereConditions.push('v.status = ?');
       whereParams.push('published');
       
-      // 2. Precio > MIN_PRICE (por defecto > 1)
+      // 2. License plate NO NULL y NO vacío (OBLIGATORIO)
+      whereConditions.push('v.license_plate IS NOT NULL');
+      whereConditions.push('v.license_plate != ?');
+      whereParams.push('');
+      
+      // 3. Precio > MIN_PRICE (por defecto > 1)
       const filterConfig = VehicleFilters.getFilterSummary();
       whereConditions.push('(v.price_usd > ? OR v.price_ars > ?)');
       whereParams.push(filterConfig.minPrice, filterConfig.minPrice);
       
-      // 3. Debe tener al menos una imagen
+      // 4. Debe tener al menos una imagen
       if (filterConfig.requireImages) {
         whereConditions.push('v.featured_image_id IS NOT NULL');
         whereConditions.push('EXISTS (SELECT 1 FROM vehicle_images vi WHERE vi.vehicle_id = v.id)');
       }
       
-      // 4. Excluir concesionarias bloqueadas (Dakota por defecto)
+      // 5. Excluir concesionarias bloqueadas (Dakota por defecto)
       // Se verifica en el JSON additional_data.stock_info[].branch_office_name
       if (filterConfig.blockedBranchOffices.length > 0) {
         // Para cada concesionaria bloqueada, verificar que no esté en el JSON
@@ -333,6 +338,11 @@ export class VehiclesController {
       whereConditions.push('v.status = ?');
       whereParams.push('published');
       
+      // License plate NO NULL y NO vacío (OBLIGATORIO)
+      whereConditions.push('v.license_plate IS NOT NULL');
+      whereConditions.push('v.license_plate != ?');
+      whereParams.push('');
+      
       whereConditions.push('(v.price_usd > ? OR v.price_ars > ?)');
       whereParams.push(filterConfig.minPrice, filterConfig.minPrice);
       
@@ -473,6 +483,11 @@ export class VehiclesController {
       // Construir WHERE base con filtros obligatorios
       const baseWhere: string[] = ['v.status = ?'];
       const baseParams: any[] = ['published'];
+      
+      // License plate NO NULL y NO vacío (OBLIGATORIO)
+      baseWhere.push('v.license_plate IS NOT NULL');
+      baseWhere.push('v.license_plate != ?');
+      baseParams.push('');
       
       // Aplicar filtros obligatorios del sistema
       baseWhere.push('(v.price_usd > ? OR v.price_ars > ?)');
@@ -709,6 +724,11 @@ export class VehiclesController {
       const getBaseWhere = (): { conditions: string[], params: any[] } => {
         const conditions: string[] = ['v.status = ?', 'v.id != ?'];
         const params: any[] = ['published', Number(id)];
+        
+        // License plate NO NULL y NO vacío (OBLIGATORIO)
+        conditions.push('v.license_plate IS NOT NULL');
+        conditions.push('v.license_plate != ?');
+        params.push('');
         
         conditions.push('(v.price_usd > ? OR v.price_ars > ?)');
         params.push(filterConfig.minPrice, filterConfig.minPrice);

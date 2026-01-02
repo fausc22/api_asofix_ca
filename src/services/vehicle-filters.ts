@@ -29,13 +29,25 @@ export class VehicleFilters {
       return { omit: true, reason: 'No tiene stock activo' };
     }
 
-    // FILTRO 1: Verificar concesionaria bloqueada (Dakota por defecto)
+    // FILTRO 1: Verificar concesionaria bloqueada usando location_name (Dakota por defecto)
+    // Prioridad: location_name > branch_office_name
+    const locationName = (activeStock.location_name || '').toLowerCase();
     const branchName = (activeStock.branch_office_name || '').toLowerCase();
+    
     for (const blockedOffice of filterConfig.blockedBranchOffices) {
-      if (branchName.includes(blockedOffice.toLowerCase())) {
+      const blockedLower = blockedOffice.toLowerCase();
+      // Verificar en location_name primero (prioridad)
+      if (locationName.includes(blockedLower)) {
         return { 
           omit: true, 
-          reason: `Concesionaria bloqueada: ${activeStock.branch_office_name} (filtro: ${blockedOffice})` 
+          reason: `Concesionaria bloqueada: ${activeStock.location_name || 'N/A'} (filtro: ${blockedOffice}, campo: location_name)` 
+        };
+      }
+      // Fallback a branch_office_name si location_name no está disponible
+      if (branchName.includes(blockedLower)) {
+        return { 
+          omit: true, 
+          reason: `Concesionaria bloqueada: ${activeStock.branch_office_name || 'N/A'} (filtro: ${blockedOffice}, campo: branch_office_name)` 
         };
       }
     }
@@ -60,7 +72,16 @@ export class VehicleFilters {
       }
     }
 
-    // FILTRO 4: Verificar que tenga al menos una imagen
+    // FILTRO 4: Verificar license_plate (OBLIGATORIO: NO NULL y NO vacío)
+    const licensePlate = vehicle.license_plate;
+    if (!licensePlate || licensePlate.trim().length === 0) {
+      return {
+        omit: true,
+        reason: 'License plate es NULL o vacío'
+      };
+    }
+
+    // FILTRO 5: Verificar que tenga al menos una imagen
     if (filterConfig.requireImages) {
       const hasImages = vehicle.images && vehicle.images.length > 0 && 
                        vehicle.images.some(img => img.url && img.url.trim().length > 0);

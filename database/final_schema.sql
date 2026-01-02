@@ -30,7 +30,7 @@ CREATE TABLE `pending_images` (
   PRIMARY KEY (`id`),
   KEY `idx_vehicle_id` (`vehicle_id`),
   CONSTRAINT `pending_images_ibfk_1` FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=15434 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=23120 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -58,7 +58,7 @@ CREATE TABLE `sync_logs` (
   KEY `idx_status` (`status`),
   KEY `idx_started_at` (`started_at`),
   KEY `idx_sync_type` (`sync_type`)
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -78,7 +78,7 @@ CREATE TABLE `taxonomy_terms` (
   UNIQUE KEY `unique_taxonomy_name` (`taxonomy`,`name`),
   KEY `idx_taxonomy` (`taxonomy`),
   KEY `idx_name` (`name`)
-) ENGINE=InnoDB AUTO_INCREMENT=219 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=211 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -100,7 +100,7 @@ CREATE TABLE `vehicle_images` (
   KEY `idx_vehicle_id` (`vehicle_id`),
   KEY `idx_is_featured` (`is_featured`),
   CONSTRAINT `vehicle_images_ibfk_1` FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=14178 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=7687 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -123,7 +123,7 @@ CREATE TABLE `vehicle_taxonomies` (
   KEY `idx_taxonomy` (`taxonomy`),
   CONSTRAINT `vehicle_taxonomies_ibfk_1` FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles` (`id`) ON DELETE CASCADE,
   CONSTRAINT `vehicle_taxonomies_ibfk_2` FOREIGN KEY (`term_id`) REFERENCES `taxonomy_terms` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=5707 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2826 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -162,7 +162,7 @@ CREATE TABLE `vehicles` (
   KEY `idx_last_synced_at` (`last_synced_at`),
   KEY `idx_version_hash` (`version_hash`),
   CONSTRAINT `fk_featured_image` FOREIGN KEY (`featured_image_id`) REFERENCES `vehicle_images` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=458 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=405 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -178,4 +178,4 @@ CREATE TABLE `vehicles` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-12-18 10:40:10
+-- Dump completed on 2025-12-29 18:50:39
