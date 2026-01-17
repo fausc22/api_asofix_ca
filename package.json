@@ -8,28 +8,38 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "sync:inicial": "ts-node src/scripts/sync-inicial.ts",
+    "compare:stock": "ts-node data/compare-stock.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["express", "asofix", "vehicles", "api"],
+  "keywords": [
+    "express",
+    "asofix",
+    "vehicles",
+    "api"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "express": "^4.18.2",
+    "axios": "^1.6.2",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
+    "express": "^4.18.2",
     "mysql2": "^3.6.5",
-    "axios": "^1.6.2",
-    "winston": "^3.11.0",
-    "node-cron": "^3.0.3"
+    "node-cron": "^3.0.3",
+    "nodemailer": "^7.0.12",
+    "resend": "^6.7.0",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
     "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
     "@types/node": "^20.10.6",
     "@types/node-cron": "^3.0.11",
+    "@types/nodemailer": "^7.0.4",
+    "@types/xlsx": "^0.0.35",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "xlsx": "^0.18.5"
   }
 }
-

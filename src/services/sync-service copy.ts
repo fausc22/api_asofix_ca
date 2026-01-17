@@ -300,50 +300,6 @@ class SyncService {
       return { success: true, message: `FILTRADO: ${reason}`, filtered: true };
     } else {
       // Vehículo NO debe ser filtrado: reactivar si estaba archivado
-      // CRÍTICO: Verificar que el vehículo realmente tenga stock ACTIVO antes de reactivar
-      // No reactivar si el vehículo está reservado o eliminado
-      const activeStock = vehicle.stocks?.find(
-        stock => stock.status && stock.status.toUpperCase() === 'ACTIVO'
-      );
-      
-      if (!activeStock) {
-        // No tiene stock activo - no reactivar aunque pase otros filtros
-        // Esto evita reactivar vehículos reservados/eliminados
-        if (existingId) {
-          const [statusRows] = await pool.execute<any[]>(
-            'SELECT status FROM vehicles WHERE id = ?',
-            [existingId]
-          );
-          if (statusRows[0]?.status === 'published') {
-            // Si está publicado pero no tiene stock activo, archivarlo
-            try {
-              const [existingRows] = await pool.execute<any[]>(
-                'SELECT additional_data FROM vehicles WHERE id = ?',
-                [existingId]
-              );
-              
-              let additionalData: any = {};
-              try {
-                additionalData = existingRows[0]?.additional_data ? JSON.parse(existingRows[0].additional_data) : {};
-              } catch (e) {
-                additionalData = {};
-              }
-              
-              additionalData.filter_reason = 'no_active_stock';
-              
-              await pool.execute(
-                'UPDATE vehicles SET status = ?, additional_data = ?, updated_at = NOW() WHERE id = ?',
-                ['archived', JSON.stringify(additionalData), existingId]
-              );
-              logger.warn(`Vehículo ${asofixId} archivado: no tiene stock activo`);
-            } catch (error: any) {
-              logger.error(`Error al archivar vehículo ${asofixId}: ${error.message}`);
-            }
-          }
-        }
-        return { success: true, message: `FILTRADO: No tiene stock activo`, filtered: true };
-      }
-      
       if (existingId) {
         try {
           // Verificar si está archivado
@@ -364,18 +320,12 @@ class SyncService {
             if (additionalData.filter_reason) {
               delete additionalData.filter_reason;
             }
-            if (additionalData.cleanup_verification) {
-              delete additionalData.cleanup_verification;
-            }
-            if (additionalData.archived_at) {
-              delete additionalData.archived_at;
-            }
             
             await pool.execute(
               'UPDATE vehicles SET status = ?, additional_data = ?, updated_at = NOW() WHERE id = ?',
               ['published', JSON.stringify(additionalData), existingId]
             );
-            logger.info(`Vehículo ${asofixId} reactivado (ya no cumple filtros de exclusión y tiene stock activo)`);
+            logger.info(`Vehículo ${asofixId} reactivado (ya no cumple filtros de exclusión)`);
           }
         } catch (error: any) {
           logger.error(`Error al reactivar vehículo ${asofixId}: ${error.message}`);
@@ -390,65 +340,6 @@ class SyncService {
     if (incremental) {
       const needsUpdate = await this.needsUpdate(asofixId, versionHash);
       if (!needsUpdate) {
-        // CRÍTICO: SIEMPRE verificar el estado actual del vehículo, incluso si el hash no cambió
-        // Un vehículo puede cambiar de estado (activo -> reservado/eliminado) sin cambiar el hash
-        // Verificar que el vehículo siga siendo válido según los filtros ACTUALES
-        const { omit: stillOmit, reason: stillReason } = VehicleFilters.shouldOmitVehicle(vehicle);
-        
-        if (stillOmit) {
-          // El vehículo ahora debe ser filtrado (cambió su estado o no pasa filtros)
-          const existingId = await this.findVehicleByAsofixId(asofixId);
-          if (existingId) {
-            try {
-              const [existingRows] = await pool.execute<any[]>(
-                'SELECT additional_data, status FROM vehicles WHERE id = ?',
-                [existingId]
-              );
-              
-              let additionalData: any = {};
-              try {
-                additionalData = existingRows[0]?.additional_data ? JSON.parse(existingRows[0].additional_data) : {};
-              } catch (e) {
-                additionalData = {};
-              }
-              
-              let filterReason = 'unknown';
-              if (stillReason?.toLowerCase().includes('dakota') || stillReason?.toLowerCase().includes('location_name')) {
-                filterReason = 'dakota_location';
-              } else if (stillReason?.toLowerCase().includes('precio')) {
-                filterReason = 'min_price';
-              } else if (stillReason?.toLowerCase().includes('estado')) {
-                filterReason = 'blocked_status';
-              } else if (stillReason?.toLowerCase().includes('imagen')) {
-                filterReason = 'no_images';
-              } else if (stillReason?.toLowerCase().includes('stock')) {
-                filterReason = 'no_active_stock';
-              }
-              
-              additionalData.filter_reason = filterReason;
-              
-              // Solo archivar si actualmente está publicado
-              if (existingRows[0]?.status === 'published') {
-                await pool.execute(
-                  'UPDATE vehicles SET status = ?, additional_data = ?, updated_at = NOW() WHERE id = ?',
-                  ['archived', JSON.stringify(additionalData), existingId]
-                );
-                logger.warn(`Vehículo ${asofixId} archivado (cambió estado/filtros): ${stillReason}`);
-              } else {
-                logger.info(`Vehículo ${asofixId} ya está archivado, no necesita cambio`);
-              }
-            } catch (error: any) {
-              logger.error(`Error al archivar vehículo ${asofixId}: ${error.message}`);
-            }
-          }
-          return { 
-            success: true, 
-            message: `FILTRADO: ${stillReason}`,
-            filtered: true
-          };
-        }
-        
-        // El vehículo sigue siendo válido - actualizar last_synced_at
         await pool.execute(
           'UPDATE vehicles SET last_synced_at = NOW() WHERE asofix_id = ?',
           [asofixId]
@@ -938,16 +829,16 @@ class SyncService {
       let vehicleIndexInArray = i;
       for (const vehicle of batch) {
         vehicleIndexInArray++; // Incrementar ANTES de procesar para tener el índice correcto (1-based)
-          if (limit > 0 && fase1Processed >= limit) {
-            onProgress?.('fase1', `⏹️  Límite de sincronización alcanzado (${limit}).`, { 
-              current: fase1Processed, 
-              total: limit, 
+        if (limit > 0 && fase1Processed >= limit) {
+          onProgress?.('fase1', `⏹️  Límite de sincronización alcanzado (${limit}).`, { 
+            current: fase1Processed, 
+            total: limit, 
             percentage: 95 
-            });
-            break;
-          }
+          });
+          break;
+        }
 
-          const asofixId = vehicle.id || 'ID_DESCONOCIDO';
+        const asofixId = vehicle.id || 'ID_DESCONOCIDO';
         let result: { success: boolean; message: string; vehicleId?: number; wasNew?: boolean; wasUpdated?: boolean; filtered?: boolean } | null = null;
         let retryCount = 0;
         let success = false;
@@ -966,53 +857,62 @@ class SyncService {
 
             // Agregar al Set de vehículos válidos SOLO después de confirmar procesamiento exitoso
             // Esto evita que vehículos válidos se archiven incorrectamente en la limpieza global
-            // CRÍTICO: Solo agregar si NO está filtrado y el procesamiento fue exitoso
+            // IMPORTANTE: Incluir vehículos con "Sin cambios" ya que son válidos y están publicados
             // CRÍTICO: Usar índice real del array, no fase1Processed (que solo cuenta cambios)
             if (result.success && !result.filtered && asofixId && asofixId !== 'ID_DESCONOCIDO') {
-            validVehicleIds.add(asofixId);
+              validVehicleIds.add(asofixId);
               // Log específico para debugging de vehículos problemáticos (131-134)
               if (vehicleIndexInArray >= 131 && vehicleIndexInArray <= 134) {
                 logger.info(`[DEBUG] Vehículo ${asofixId} agregado al Set de válidos (índice real: ${vehicleIndexInArray}, resultado: ${result.message})`);
               }
-          }
-
-          if (result.success) {
-            if (result.filtered) {
-              fase1Filtered++;
-              onProgress?.('fase1', `🚫 ${result.message}`, { 
-                current: fase1Processed, 
-                  total: allVehiclesFromAPI.length, 
-                  percentage: 45 + Math.round((fase1Processed / allVehiclesFromAPI.length) * 50) 
-              });
-            } else if (result.message.includes('Sin cambios')) {
-              onProgress?.('fase1', `⏭️  ${result.message}`, { 
-                current: fase1Processed, 
-                  total: allVehiclesFromAPI.length, 
-                  percentage: 45 + Math.round((fase1Processed / allVehiclesFromAPI.length) * 50) 
-              });
-            } else {
-              onProgress?.('fase1', `✅ ${result.message}`, { 
-                current: fase1Processed + 1, 
-                  total: allVehiclesFromAPI.length, 
-                  percentage: 45 + Math.round(((fase1Processed + 1) / allVehiclesFromAPI.length) * 50) 
-              });
-              fase1Processed++;
-              if (result.wasNew) {
-                fase1Created++;
-              } else if (result.wasUpdated) {
-                fase1Updated++;
+            } else if (result.success && result.message.includes('Sin cambios') && asofixId && asofixId !== 'ID_DESCONOCIDO') {
+              // Asegurar que vehículos con "Sin cambios" se agreguen al Set (por si acaso)
+              validVehicleIds.add(asofixId);
+              if (vehicleIndexInArray >= 131 && vehicleIndexInArray <= 134) {
+                logger.info(`[DEBUG] Vehículo ${asofixId} agregado al Set de válidos (Sin cambios, índice real: ${vehicleIndexInArray})`);
               }
             }
-          } else {
-            onProgress?.('fase1', `❌ ${result.message}`, { 
-              current: fase1Processed, 
+
+            if (result.success) {
+              if (result.filtered) {
+                fase1Filtered++;
+                onProgress?.('fase1', `🚫 ${result.message}`, { 
+                  current: fase1Processed, 
+                  total: allVehiclesFromAPI.length, 
+                  percentage: 45 + Math.round((fase1Processed / allVehiclesFromAPI.length) * 50) 
+                });
+              } else if (result.message.includes('Sin cambios')) {
+                onProgress?.('fase1', `⏭️  ${result.message}`, { 
+                  current: fase1Processed, 
+                  total: allVehiclesFromAPI.length, 
+                  percentage: 45 + Math.round((fase1Processed / allVehiclesFromAPI.length) * 50) 
+                });
+              } else {
+                onProgress?.('fase1', `✅ ${result.message}`, { 
+                  current: fase1Processed + 1, 
+                  total: allVehiclesFromAPI.length, 
+                  percentage: 45 + Math.round(((fase1Processed + 1) / allVehiclesFromAPI.length) * 50) 
+                });
+                fase1Processed++;
+                if (result.wasNew) {
+                  fase1Created++;
+                } else if (result.wasUpdated) {
+                  fase1Updated++;
+                }
+              }
+            } else {
+              onProgress?.('fase1', `❌ ${result.message}`, { 
+                current: fase1Processed, 
                 total: allVehiclesFromAPI.length, 
                 percentage: 45 + Math.round((fase1Processed / allVehiclesFromAPI.length) * 50) 
-            });
-            fase1Errors++;
-              // NO agregar al Set si hay errores - solo agregar si el procesamiento fue exitoso
-              // Si hay un error, el vehículo no se procesó correctamente y no debe estar en el Set
-              logger.warn(`[DEBUG] Vehículo ${asofixId} NO agregado al Set debido a error en procesamiento`);
+              });
+              fase1Errors++;
+              // Si falla pero el vehículo es válido según filtros, agregarlo al Set para evitar archivado
+              const { omit } = VehicleFilters.shouldOmitVehicle(vehicle);
+              if (!omit && asofixId && asofixId !== 'ID_DESCONOCIDO') {
+                validVehicleIds.add(asofixId);
+                logger.warn(`[DEBUG] Vehículo ${asofixId} agregado al Set después de error (para evitar archivado incorrecto)`);
+              }
             }
           } catch (error: any) {
             retryCount++;
@@ -1024,10 +924,12 @@ class SyncService {
                 percentage: 45 + Math.round((fase1Processed / allVehiclesFromAPI.length) * 50) 
               });
               fase1Errors++;
-              // NO agregar al Set si hay errores después de todos los reintentos
-              // Si el procesamiento falló completamente, el vehículo no debe estar en el Set
-              // La limpieza global verificará si el vehículo está en la API antes de archivarlo
-              logger.warn(`Vehículo ${asofixId} NO agregado al Set debido a error fatal después de ${maxRetries} intentos`);
+              // Aún así, si el vehículo es válido según los filtros, agregarlo al Set para evitar archivarlo
+              const { omit } = VehicleFilters.shouldOmitVehicle(vehicle);
+              if (!omit && asofixId && asofixId !== 'ID_DESCONOCIDO') {
+                validVehicleIds.add(asofixId);
+                logger.warn(`Vehículo ${asofixId} agregado al Set de válidos a pesar del error (para evitar archivado incorrecto)`);
+              }
             } else {
               logger.warn(`Error transitorio al procesar vehículo ${asofixId}, reintentando... (${retryCount}/${maxRetries}): ${error.message}`);
               await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Backoff exponencial
@@ -1058,9 +960,9 @@ class SyncService {
     });
 
     try {
-      // Buscar SOLO vehículos archivados por limpieza global (not_in_valid_set o no_encontrado_en_api)
-      // NO reactivar vehículos archivados por otras razones (filtros de negocio, etc.)
-      // Esto evita reactivar vehículos que fueron archivados correctamente por no pasar filtros
+      // Buscar vehículos archivados que fueron archivados recientemente o tienen filter_reason relacionado con limpieza
+      // Estos son vehículos que fueron archivados porque no estaban en el Set, pero podrían estar en la API
+      // Buscar todos los archivados recientemente (últimos 30 días) para asegurar que no se pierdan vehículos válidos
       const [archivedVehicles] = await pool.execute<any[]>(
         `SELECT id, asofix_id, title, license_plate, additional_data, updated_at
          FROM vehicles 
@@ -1071,6 +973,7 @@ class SyncService {
              JSON_EXTRACT(additional_data, '$.filter_reason') = 'not_in_valid_set'
              OR JSON_EXTRACT(additional_data, '$.filter_reason') = 'no_encontrado_en_api'
              OR JSON_EXTRACT(additional_data, '$.cleanup_verification') IS NOT NULL
+             OR updated_at > DATE_SUB(NOW(), INTERVAL 30 DAY)
            )
          ORDER BY updated_at DESC
          LIMIT 200`,
@@ -1135,7 +1038,7 @@ class SyncService {
 
             // Pausa para no sobrecargar la API
             await new Promise(resolve => setTimeout(resolve, 300));
-      } catch (error: any) {
+          } catch (error: any) {
             logger.error(`[Reactivación] Error al verificar vehículo ${archivedVehicle.asofix_id}: ${error.message}`);
           }
         }
@@ -1143,7 +1046,7 @@ class SyncService {
         if (reactivatedCount > 0) {
           logger.info(`[Reactivación] ${reactivatedCount} vehículos reactivados exitosamente.`);
           onProgress?.('fase1', `✅ Fase 1.3 completada: ${reactivatedCount} vehículos reactivados.`, { 
-          current: fase1Processed, 
+            current: fase1Processed, 
             total: fase1Processed, 
             percentage: 94 
           });
@@ -1193,13 +1096,15 @@ class SyncService {
         const placeholders = validIdsArray.map(() => '?').join(',');
 
         // Buscar vehículos publicados que NO están en el Set de válidos
-        // NO excluir por fecha - los vehículos pueden cambiar de estado constantemente
+        // Excluir vehículos publicados recientemente (últimas 48 horas) para evitar archivar vehículos
+        // que fueron publicados manualmente o que acaban de ser procesados
         // Equivalente a la query que busca posts publicados en cleanup_phase_cron() del PHP
         const [publishedVehicles] = await pool.execute<any[]>(
           `SELECT id, asofix_id, title, updated_at, additional_data
            FROM vehicles 
            WHERE status = 'published'
              AND asofix_id NOT IN (${placeholders})
+             AND (updated_at < DATE_SUB(NOW(), INTERVAL 48 HOUR) OR updated_at IS NULL)
            LIMIT 10000`,
           validIdsArray
         );
@@ -1219,10 +1124,12 @@ class SyncService {
               );
 
               const licensePlate = vehicleRows[0]?.license_plate;
+              const updatedAt = vehicle.updated_at ? new Date(vehicle.updated_at) : null;
+              const hoursSinceUpdate = updatedAt ? (Date.now() - updatedAt.getTime()) / (1000 * 60 * 60) : Infinity;
               let shouldArchive = true;
               let verificationReason = 'no_encontrado_en_api';
               
-              logger.info(`[Cleanup] Vehículo ${vehicle.asofix_id} tiene license_plate: ${licensePlate || 'NULL'}`);
+              logger.info(`[Cleanup] Vehículo ${vehicle.asofix_id} tiene license_plate: ${licensePlate || 'NULL'}, actualizado hace ${hoursSinceUpdate.toFixed(1)} horas`);
               
               // Verificar si tiene flag de mantener publicado
               let additionalData: any = {};
@@ -1232,7 +1139,7 @@ class SyncService {
                 // Si hay error parseando, usar objeto vacío
               }
               
-              // Si tiene flag keep_published, NO archivar (solo para casos especiales)
+              // Si tiene flag keep_published, NO archivar
               if (additionalData.keep_published === true) {
                 shouldArchive = false;
                 verificationReason = 'keep_published_flag';
@@ -1241,53 +1148,37 @@ class SyncService {
                 continue; // Saltar al siguiente vehículo
               }
               
-              // NO proteger vehículos por fecha - pueden cambiar de estado constantemente
-              // Verificar directamente en la API si el vehículo debe estar publicado
+              // Si fue actualizado recientemente (menos de 48 horas), ser más conservador y NO archivar
+              // Esto evita archivar vehículos que fueron publicados manualmente recientemente
+              if (hoursSinceUpdate < 48) {
+                shouldArchive = false;
+                verificationReason = `actualizado_recientemente_${hoursSinceUpdate.toFixed(1)}h`;
+                validVehicleIds.add(vehicle.asofix_id);
+                logger.info(`[Cleanup] Vehículo ${vehicle.asofix_id} fue actualizado recientemente (${hoursSinceUpdate.toFixed(1)}h) - NO se archiva para evitar pérdida de vehículos publicados manualmente`);
+                continue; // Saltar al siguiente vehículo
+              }
 
               // ANTES de archivar, verificar si el vehículo existe en la API y pasa los filtros
               if (licensePlate && licensePlate.trim().length > 0) {
                 try {
-                  logger.info(`[Cleanup] Buscando vehículo ${vehicle.asofix_id} en API por license_plate: ${licensePlate}...`);
                   const apiVehicle = await asofixApi.getVehicleByLicensePlate(licensePlate);
                   
-                  if (apiVehicle) {
-                    // Verificar que el ID coincida exactamente
-                    if (apiVehicle.id === vehicle.asofix_id) {
-                      // Vehículo encontrado en la API con ID coincidente
-                      // CRÍTICO: Verificar el estado ACTUAL del vehículo, no solo si pasa filtros
-                      // Verificar si tiene stock ACTIVO (no reservado/eliminado)
-                      const activeStock = apiVehicle.stocks?.find(
-                        stock => stock.status && stock.status.toUpperCase() === 'ACTIVO'
-                      );
-                      
-                      if (!activeStock) {
-                        // El vehículo está en la API pero NO tiene stock activo (reservado/eliminado) - archivar
-                        shouldArchive = true;
-                        verificationReason = 'no_tiene_stock_activo_en_api';
-                        logger.warn(`[Cleanup] Vehículo ${vehicle.asofix_id} (${vehicle.title}) encontrado en API pero sin stock activo - archivando`);
-                      } else {
-                        // Tiene stock activo, verificar si pasa los filtros
-                        const { omit, reason } = VehicleFilters.shouldOmitVehicle(apiVehicle);
-                        
-                        if (!omit) {
-                          // El vehículo existe en la API, tiene stock activo y pasa los filtros - NO archivar
-                          shouldArchive = false;
-                          verificationReason = 'valido_en_api_con_stock_activo';
-                          // Agregarlo al Set de válidos para evitar futuros archivados
-                          validVehicleIds.add(vehicle.asofix_id);
-                          logger.info(`[Cleanup] Vehículo ${vehicle.asofix_id} (${vehicle.title}) encontrado en API con stock activo y válido - NO se archiva`);
-                        } else {
-                          // El vehículo existe en la API pero NO pasa los filtros - archivar
-                          shouldArchive = true;
-                          verificationReason = `filtrado_en_api: ${reason}`;
-                          logger.warn(`[Cleanup] Vehículo ${vehicle.asofix_id} (${vehicle.title}) encontrado en API pero filtrado: ${reason} - archivando`);
-                        }
-                      }
+                  if (apiVehicle && apiVehicle.id === vehicle.asofix_id) {
+                    // Vehículo encontrado en la API, verificar si pasa los filtros
+                    const { omit, reason } = VehicleFilters.shouldOmitVehicle(apiVehicle);
+                    
+                    if (!omit) {
+                      // El vehículo existe en la API y pasa los filtros - NO archivar
+                      shouldArchive = false;
+                      verificationReason = 'valido_en_api';
+                      // Agregarlo al Set de válidos para evitar futuros archivados
+                      validVehicleIds.add(vehicle.asofix_id);
+                      logger.info(`[Cleanup] Vehículo ${vehicle.asofix_id} (${vehicle.title}) encontrado en API y válido - NO se archiva`);
                     } else {
-                      // Vehículo encontrado pero con ID diferente - no es el mismo vehículo
+                      // El vehículo existe en la API pero NO pasa los filtros - archivar
                       shouldArchive = true;
-                      verificationReason = `id_no_coincide: encontrado ${apiVehicle.id}, esperado ${vehicle.asofix_id}`;
-                      logger.warn(`[Cleanup] Vehículo con patente ${licensePlate} encontrado pero con ID diferente (${apiVehicle.id} vs ${vehicle.asofix_id}) - archivando`);
+                      verificationReason = `filtrado_en_api: ${reason}`;
+                      logger.warn(`[Cleanup] Vehículo ${vehicle.asofix_id} (${vehicle.title}) encontrado en API pero filtrado: ${reason}`);
                     }
                   } else {
                     // Vehículo no encontrado en la API - archivar
@@ -1296,21 +1187,16 @@ class SyncService {
                     logger.warn(`[Cleanup] Vehículo ${vehicle.asofix_id} (${vehicle.title}) no encontrado en API - archivando`);
                   }
                 } catch (apiError: any) {
-                  // Error al consultar la API - NO agregar al Set, pero tampoco archivar inmediatamente
-                  // En caso de error, ser conservador: NO archivar si no podemos verificar
-                  // Pero tampoco agregar al Set sin verificación
-                  shouldArchive = false; // Cambio: no archivar si hay error en verificación
+                  // Error al consultar la API - asumir que debe archivarse (comportamiento conservador)
+                  shouldArchive = true;
                   verificationReason = `error_consulta_api: ${apiError.message}`;
-                  logger.error(`[Cleanup] Error al verificar vehículo ${vehicle.asofix_id} en API: ${apiError.message} - NO se archiva por seguridad (error en verificación)`);
-                  // NO agregar al Set si hay error - la próxima sync lo verificará nuevamente
+                  logger.warn(`[Cleanup] Error al verificar vehículo ${vehicle.asofix_id} en API: ${apiError.message} - archivando por seguridad`);
                 }
               } else {
-                // Sin license_plate - no se puede verificar en API
-                // NO archivar sin verificación - podría ser un vehículo válido sin patente
-                shouldArchive = false;
+                // Sin license_plate - no se puede verificar en API, archivar
+                shouldArchive = true;
                 verificationReason = 'sin_license_plate';
-                logger.warn(`[Cleanup] Vehículo ${vehicle.asofix_id} (${vehicle.title}) sin license_plate - no se puede verificar en API - NO se archiva por seguridad`);
-                // NO agregar al Set sin verificación
+                logger.warn(`[Cleanup] Vehículo ${vehicle.asofix_id} (${vehicle.title}) sin license_plate - no se puede verificar en API - archivando`);
               }
 
               if (shouldArchive) {
@@ -1318,20 +1204,20 @@ class SyncService {
                 let additionalData: any = {};
                 try {
                   additionalData = vehicleRows[0]?.additional_data ? JSON.parse(vehicleRows[0].additional_data) : {};
-              } catch (e) {
-                // Si hay error parseando, usar objeto vacío
-              }
+                } catch (e) {
+                  // Si hay error parseando, usar objeto vacío
+                }
 
-              additionalData.filter_reason = 'not_in_valid_set';
+                additionalData.filter_reason = 'not_in_valid_set';
                 additionalData.cleanup_verification = verificationReason;
-              additionalData.archived_at = new Date().toISOString();
+                additionalData.archived_at = new Date().toISOString();
 
-              await pool.execute(
-                'UPDATE vehicles SET status = ?, additional_data = ?, updated_at = NOW() WHERE id = ?',
-                ['archived', JSON.stringify(additionalData), vehicle.id]
-              );
+                await pool.execute(
+                  'UPDATE vehicles SET status = ?, additional_data = ?, updated_at = NOW() WHERE id = ?',
+                  ['archived', JSON.stringify(additionalData), vehicle.id]
+                );
 
-              fase1Archived++;
+                fase1Archived++;
                 logger.warn(`[Cleanup] Vehículo ${vehicle.asofix_id} (${vehicle.title}) archivado: ${verificationReason}`);
               }
             } catch (error: any) {

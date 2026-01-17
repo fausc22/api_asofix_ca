@@ -10,6 +10,7 @@ export interface AsofixVehicle {
   year?: number;
   kilometres?: number;
   license_plate?: string;
+  origin?: string;
   car_condition?: 'new' | 'used';
   car_transmission?: string;
   car_fuel_type?: string;
@@ -166,6 +167,178 @@ class AsofixApi {
     }
 
     return vehicles;
+  }
+
+  /**
+   * Busca un vehículo por license_plate en la API de Asofix
+   * @param licensePlate Número de patente a buscar
+   * @returns Vehículo encontrado o null si no existe
+   */
+  async getVehicleByLicensePlate(licensePlate: string): Promise<AsofixVehicle | null> {
+    if (!this.apiKey) {
+      throw new Error('La API Key no está configurada. Verifica tu archivo .env');
+    }
+
+    if (!licensePlate || licensePlate.trim().length === 0) {
+      throw new Error('El license_plate es requerido');
+    }
+
+    const normalizedLicensePlate = licensePlate.trim().toUpperCase();
+
+    try {
+      // Intentar primero con un parámetro de búsqueda si la API lo soporta
+      // Si no funciona, buscar página por página
+      let currentPage = 1;
+      let hasMore = true;
+      const maxPages = parseInt(process.env.ASOFIX_SEARCH_MAX_PAGES || '500', 10); // Límite configurable, default 500
+      let pagesSearched = 0;
+      let consecutiveErrors = 0;
+      const maxConsecutiveErrors = 3; // Detener solo si hay 3 errores consecutivos
+
+      while (hasMore && pagesSearched < maxPages) {
+        try {
+          const response = await this.getVehiclesPage(currentPage, 100); // Buscar más vehículos por página para ser más eficiente
+          const pageVehicles = response.data || [];
+          
+          // Resetear contador de errores si la página fue exitosa
+          consecutiveErrors = 0;
+
+          // Buscar el vehículo con el license_plate coincidente
+          const foundVehicle = pageVehicles.find(vehicle => {
+            if (!vehicle.license_plate) return false;
+            return vehicle.license_plate.trim().toUpperCase() === normalizedLicensePlate;
+          });
+
+          if (foundVehicle) {
+            logger.info(`Vehículo encontrado por license_plate: ${normalizedLicensePlate} en la página ${currentPage}`);
+            return foundVehicle;
+          }
+
+          // Verificar si hay más páginas
+          const meta = response.meta;
+          if (meta && meta.current_page && meta.total_pages) {
+            hasMore = meta.current_page < meta.total_pages;
+            currentPage++;
+            logger.debug(`Buscando en página ${currentPage}/${meta.total_pages}...`);
+          } else {
+            // Si no hay metadata, continuar mientras haya vehículos
+            hasMore = pageVehicles.length > 0;
+            currentPage++;
+          }
+
+          pagesSearched++;
+
+          // Pausa para no sobrecargar la API
+          await new Promise(resolve => setTimeout(resolve, 200));
+        } catch (error: any) {
+          consecutiveErrors++;
+          logger.warn(`Error al buscar en página ${currentPage} (error ${consecutiveErrors}/${maxConsecutiveErrors}): ${error.message}`);
+          
+          // Solo detener si hay demasiados errores consecutivos
+          if (consecutiveErrors >= maxConsecutiveErrors) {
+            logger.error(`Demasiados errores consecutivos (${consecutiveErrors}). Deteniendo búsqueda después de ${pagesSearched} páginas.`);
+            hasMore = false;
+          } else {
+            // Continuar con la siguiente página después de un breve delay
+            currentPage++;
+            pagesSearched++;
+            await new Promise(resolve => setTimeout(resolve, 500)); // Delay más largo después de error
+          }
+        }
+      }
+
+      logger.info(`Vehículo no encontrado con license_plate: ${normalizedLicensePlate} (buscado en ${pagesSearched} páginas, máximo: ${maxPages})`);
+      return null;
+    } catch (error: any) {
+      logger.error(`Error al buscar vehículo por license_plate: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Busca un vehículo por origin en la API de Asofix
+   * @param origin Origen del vehículo a buscar
+   * @returns Vehículo encontrado o null si no existe
+   */
+  async getVehicleByOrigin(origin: string): Promise<AsofixVehicle | null> {
+    if (!this.apiKey) {
+      throw new Error('La API Key no está configurada. Verifica tu archivo .env');
+    }
+
+    if (!origin || origin.trim().length === 0) {
+      throw new Error('El origin es requerido');
+    }
+
+    const normalizedOrigin = origin.trim().toUpperCase();
+
+    try {
+      // Intentar primero con un parámetro de búsqueda si la API lo soporta
+      // Si no funciona, buscar página por página
+      let currentPage = 1;
+      let hasMore = true;
+      const maxPages = parseInt(process.env.ASOFIX_SEARCH_MAX_PAGES || '500', 10); // Límite configurable, default 500
+      let pagesSearched = 0;
+      let consecutiveErrors = 0;
+      const maxConsecutiveErrors = 3; // Detener solo si hay 3 errores consecutivos
+
+      while (hasMore && pagesSearched < maxPages) {
+        try {
+          const response = await this.getVehiclesPage(currentPage, 100); // Buscar más vehículos por página para ser más eficiente
+          const pageVehicles = response.data || [];
+          
+          // Resetear contador de errores si la página fue exitosa
+          consecutiveErrors = 0;
+
+          // Buscar el vehículo con el origin coincidente
+          const foundVehicle = pageVehicles.find(vehicle => {
+            if (!vehicle.origin) return false;
+            return vehicle.origin.trim().toUpperCase() === normalizedOrigin;
+          });
+
+          if (foundVehicle) {
+            logger.info(`Vehículo encontrado por origin: ${normalizedOrigin} en la página ${currentPage}`);
+            return foundVehicle;
+          }
+
+          // Verificar si hay más páginas
+          const meta = response.meta;
+          if (meta && meta.current_page && meta.total_pages) {
+            hasMore = meta.current_page < meta.total_pages;
+            currentPage++;
+            logger.debug(`Buscando en página ${currentPage}/${meta.total_pages}...`);
+          } else {
+            // Si no hay metadata, continuar mientras haya vehículos
+            hasMore = pageVehicles.length > 0;
+            currentPage++;
+          }
+
+          pagesSearched++;
+
+          // Pausa para no sobrecargar la API
+          await new Promise(resolve => setTimeout(resolve, 200));
+        } catch (error: any) {
+          consecutiveErrors++;
+          logger.warn(`Error al buscar en página ${currentPage} (error ${consecutiveErrors}/${maxConsecutiveErrors}): ${error.message}`);
+          
+          // Solo detener si hay demasiados errores consecutivos
+          if (consecutiveErrors >= maxConsecutiveErrors) {
+            logger.error(`Demasiados errores consecutivos (${consecutiveErrors}). Deteniendo búsqueda después de ${pagesSearched} páginas.`);
+            hasMore = false;
+          } else {
+            // Continuar con la siguiente página después de un breve delay
+            currentPage++;
+            pagesSearched++;
+            await new Promise(resolve => setTimeout(resolve, 500)); // Delay más largo después de error
+          }
+        }
+      }
+
+      logger.info(`Vehículo no encontrado con origin: ${normalizedOrigin} (buscado en ${pagesSearched} páginas, máximo: ${maxPages})`);
+      return null;
+    } catch (error: any) {
+      logger.error(`Error al buscar vehículo por origin: ${error.message}`);
+      throw error;
+    }
   }
 }
 

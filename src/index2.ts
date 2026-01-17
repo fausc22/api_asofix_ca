@@ -7,7 +7,6 @@ import vehiclesRoutes from './routes/vehicles.routes';
 import syncRoutes from './routes/sync.routes';
 import feedsRoutes from './routes/feeds.routes';
 import auditRoutes from './routes/audit.routes';
-import asofixRoutes from './routes/asofix.routes';
 import leadsRoutes from './routes/leads.routes';
 import logger from './services/logger';
 import syncCronJob from './jobs/sync-cron';
@@ -162,7 +161,6 @@ app.use('/sync', syncRoutes);
 app.use('/feeds', feedsRoutes);
 app.use('/internal', auditRoutes);
 app.use('/api/leads', leadsRoutes);
-app.use('/asofix', asofixRoutes);
 
 // Ruta de salud
 app.get('/health', async (req, res) => {
