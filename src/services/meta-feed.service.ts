@@ -8,12 +8,12 @@ import {
   normalizeTransmission,
   normalizeAvailability,
   normalizeMileage,
-  getVehicleAddress,
 } from './meta-feed-normalizers';
 
 /**
  * Servicio para generar feeds CSV compatibles con Meta Ads (Facebook Catalog) - Automotive Inventory Ads
  * 
+ * Estructura basada en el CSV validado manualmente por Meta (catalogo_aprobado.csv)
  * Referencia: Guía técnica Meta Ads para feeds de vehículos (CSV)
  */
 export class MetaFeedService {
@@ -23,6 +23,20 @@ export class MetaFeedService {
   private static API_URL = process.env.API_BASE_URL || 'https://api-caradvice.duckdns.org';
   private static CACHE_TTL = 10 * 60 * 1000; // 10 minutos
   private static cache: { csv: string; timestamp: number } | null = null;
+
+  /**
+   * Dirección por defecto de Car Advice (usada en el CSV aprobado)
+   * Esta configuración debe coincidir exactamente con el CSV validado por Meta
+   */
+  private static DEFAULT_ADDRESS = {
+    addr1: process.env.META_FEED_ADDRESS_ADDR1 || 'Octavio Pinto 3024',
+    city: process.env.META_FEED_ADDRESS_CITY || 'Cordoba',
+    region: process.env.META_FEED_ADDRESS_REGION || 'Cordoba',
+    postal_code: process.env.META_FEED_ADDRESS_POSTAL_CODE || '5000',
+    country: process.env.META_FEED_ADDRESS_COUNTRY || 'AR',
+    latitude: process.env.META_FEED_ADDRESS_LAT || '-31.4167',
+    longitude: process.env.META_FEED_ADDRESS_LNG || '-64.1833',
+  };
 
   /**
    * Construye la URL completa de una imagen
@@ -85,9 +99,6 @@ export class MetaFeedService {
     // Limitar a 500 caracteres (recomendación de Meta)
     return text.substring(0, 500);
   }
-
-  // Dirección por defecto para vehículos sin ubicación
-  private static DEFAULT_ADDRESS = process.env.META_FEED_DEFAULT_ADDRESS || 'Córdoba, Córdoba, Argentina';
 
   /**
    * Obtiene todos los vehículos publicados con sus imágenes y taxonomías
@@ -216,35 +227,100 @@ export class MetaFeedService {
   }
 
   /**
+   * Valida que los nombres de columnas sean exactamente iguales al CSV aprobado
+   * Esta validación asegura que Meta acepte el feed
+   */
+  private static validateColumnNames(columns: string[]): boolean {
+    // Columnas EXACTAS del CSV aprobado (catalogo_aprobado.csv)
+    // IMPORTANTE: Orden y nombres deben ser idénticos, sin espacios ni caracteres invisibles
+    const expectedColumns = [
+      'vehicle_id',
+      'title',
+      'description',
+      'availability',
+      'state_of_vehicle',
+      'condition',
+      'price',
+      'url',
+      'image[0].url',
+      'image[1].url',
+      'make',
+      'model',
+      'year',
+      'mileage.value',
+      'mileage.unit',
+      'fuel_type',
+      'transmission',
+      'body_style',
+      'address.addr1',
+      'address.city',
+      'address.region',
+      'address.postal_code',
+      'address.country',
+      'latitude',
+      'longitude',
+    ];
+
+    if (columns.length !== expectedColumns.length) {
+      logger.error(`[MetaFeed] ERROR: Número de columnas incorrecto. Esperado: ${expectedColumns.length}, Obtenido: ${columns.length}`);
+      return false;
+    }
+
+    for (let i = 0; i < columns.length; i++) {
+      if (columns[i] !== expectedColumns[i]) {
+        logger.error(`[MetaFeed] ERROR: Columna ${i + 1} incorrecta. Esperado: "${expectedColumns[i]}", Obtenido: "${columns[i]}"`);
+        return false;
+      }
+    }
+
+    logger.info(`[MetaFeed] Validación de columnas: OK (${columns.length} columnas correctas)`);
+    return true;
+  }
+
+  /**
    * Genera el CSV del feed
+   * Estructura EXACTA basada en el CSV aprobado por Meta (catalogo_aprobado.csv)
+   * IMPORTANTE: Los nombres de columnas deben ser idénticos al ejemplo proporcionado
    */
   private static async generateCSV(): Promise<string> {
     const vehicles = await this.getPublishedVehicles();
     
     logger.info(`[MetaFeed] Generando feed CSV para ${vehicles.length} vehículos publicados`);
 
-    // Definir columnas del CSV según especificación de Meta
-    // Orden: campos requeridos primero, luego opcionales
-    // IMPORTANTE: Nombres de columnas deben coincidir exactamente con especificación Meta
+    // Columnas EXACTAS según el CSV aprobado por Meta (catalogo_aprobado.csv)
+    // IMPORTANTE: Orden y nombres deben ser idénticos, sin espacios ni caracteres invisibles
     const columns = [
-      'vehicle_id',            // Requerido (renombrado de 'id')
-      'title',                 // Requerido
-      'description',           // Requerido
-      'availability',          // Requerido
-      'state_of_vehicle',      // Requerido (renombrado de 'condition')
-      'price',                 // Requerido
-      'link',                  // Requerido
-      'image',                 // Requerido (renombrado de 'image_link')
-      'make',                  // Requerido (brand)
-      'model',                 // Requerido
-      'year',                  // Requerido
-      'mileage',               // Requerido (obligatorio)
-      'address',               // Requerido (nuevo campo obligatorio)
-      'fuel_type',             // Recomendado
-      'transmission',          // Recomendado
-      'body_style',            // Recomendado (segment)
-      'additional_image_link'  // Opcional (hasta 10 imágenes)
+      'vehicle_id',
+      'title',
+      'description',
+      'availability',
+      'state_of_vehicle',
+      'condition',
+      'price',
+      'url',
+      'image[0].url',
+      'image[1].url',
+      'make',
+      'model',
+      'year',
+      'mileage.value',
+      'mileage.unit',
+      'fuel_type',
+      'transmission',
+      'body_style',
+      'address.addr1',
+      'address.city',
+      'address.region',
+      'address.postal_code',
+      'address.country',
+      'latitude',
+      'longitude',
     ];
+
+    // Validar que las columnas sean exactamente iguales al CSV aprobado
+    if (!this.validateColumnNames(columns)) {
+      throw new Error('Los nombres de columnas no coinciden con el formato requerido por Meta');
+    }
 
     const rows: string[][] = [];
     
@@ -295,8 +371,12 @@ export class MetaFeedService {
           continue;
         }
 
-        const imageLink = uniqueImageUrls[0];
-        const additionalImageLinks = uniqueImageUrls.slice(1, 11); // Máximo 10 imágenes adicionales
+        // Imagen principal (image[0].url) - sin comillas, URL simple
+        const mainImage = uniqueImageUrls[0];
+        // Imágenes adicionales (image[1].url) - separadas por coma, máximo 11 (total 12 imágenes)
+        // IMPORTANTE: Este campo debe contener múltiples URLs separadas por coma
+        // El escapeCsvField se encargará de agregar comillas si es necesario
+        const additionalImages = uniqueImageUrls.slice(1, 12).join(',');
 
         // Obtener datos de taxonomías
         const taxonomies = vehicle.taxonomies || {};
@@ -314,7 +394,7 @@ export class MetaFeedService {
           continue;
         }
 
-        // 2️⃣ Normalizar y validar state_of_vehicle (OBLIGATORIO)
+        // Normalizar y validar state_of_vehicle (OBLIGATORIO)
         const stateOfVehicle = normalizeStateOfVehicle(rawCondition);
         if (!stateOfVehicle) {
           skippedCount++;
@@ -322,15 +402,15 @@ export class MetaFeedService {
           continue;
         }
 
-        // 7️⃣ Validar mileage (OBLIGATORIO)
-        const mileage = normalizeMileage(vehicle.kilometres);
-        if (!mileage) {
+        // Validar mileage (OBLIGATORIO)
+        const mileageValue = normalizeMileage(vehicle.kilometres);
+        if (!mileageValue) {
           skippedCount++;
           logger.warn(`[MetaFeed] Vehículo ${vehicle.id} omitido: mileage inválido o faltante (valor: ${vehicle.kilometres})`);
           continue;
         }
 
-        // 8️⃣ Normalizar y validar transmission (OBLIGATORIO)
+        // Normalizar y validar transmission (OBLIGATORIO)
         const transmission = normalizeTransmission(rawTransmission);
         if (!transmission) {
           skippedCount++;
@@ -338,7 +418,7 @@ export class MetaFeedService {
           continue;
         }
 
-        // 4️⃣ Normalizar fuel_type (si no se puede normalizar, excluir)
+        // Normalizar fuel_type (OBLIGATORIO)
         const fuelType = normalizeFuelType(rawFuelType);
         if (!fuelType) {
           skippedCount++;
@@ -346,38 +426,51 @@ export class MetaFeedService {
           continue;
         }
 
-        // 1️⃣ Normalizar body_style
+        // Normalizar body_style
         const bodyStyle = normalizeBodyStyle(rawBodyStyle);
 
-        // 9️⃣ Normalizar availability (todos los vehículos aquí son published)
+        // Normalizar availability (todos los vehículos aquí son published)
         const availability = normalizeAvailability('published', true);
-
-        // 5️⃣ Obtener address (OBLIGATORIO)
-        const address = getVehicleAddress(vehicle.additional_data, this.DEFAULT_ADDRESS);
 
         // Construir descripción
         const description = this.sanitizeDescription(vehicle.content || vehicle.title);
 
-        // Construir fila CSV con campos corregidos
+        // Construir fila CSV con estructura EXACTA del CSV aprobado
+        // IMPORTANTE: El orden debe coincidir exactamente con el array de columnas
         const row: string[] = [
-          String(vehicle.id),                    // vehicle_id (renombrado de 'id')
+          String(vehicle.id),                    // vehicle_id
           vehicle.title,                         // title
           description,                           // description
-          availability,                          // availability (normalizado)
-          stateOfVehicle,                        // state_of_vehicle (renombrado y normalizado)
-          priceFormatted,                        // price
-          vehicleUrl,                            // link
-          imageLink,                             // image (renombrado de 'image_link')
-          brand,                                 // make (brand)
+          availability,                          // availability (AVAILABLE)
+          stateOfVehicle,                        // state_of_vehicle (NEW/USED/CPO)
+          'OTHER',                               // condition (valor fijo como en CSV aprobado)
+          priceFormatted,                        // price (50000 USD o 24000000 ARS)
+          vehicleUrl,                            // url
+          mainImage,                             // image[0].url
+          additionalImages,                      // image[1].url (múltiples URLs separadas por coma)
+          brand,                                 // make
           model,                                 // model
           vehicle.year ? String(vehicle.year) : '', // year
-          mileage,                              // mileage (validado y normalizado)
-          address,                               // address (nuevo campo obligatorio)
-          fuelType,                              // fuel_type (normalizado)
-          transmission,                          // transmission (normalizado)
-          bodyStyle,                             // body_style (normalizado)
-          additionalImageLinks.join(',')         // additional_image_link (comma-separated URLs)
+          mileageValue,                          // mileage.value
+          'KM',                                  // mileage.unit (siempre KM)
+          fuelType,                              // fuel_type (GASOLINE, DIESEL, etc.)
+          transmission,                          // transmission (AUTOMATIC, MANUAL, OTHER)
+          bodyStyle,                             // body_style (SEDAN, SUV, etc.)
+          this.DEFAULT_ADDRESS.addr1,            // address.addr1
+          this.DEFAULT_ADDRESS.city,             // address.city
+          this.DEFAULT_ADDRESS.region,           // address.region
+          this.DEFAULT_ADDRESS.postal_code,      // address.postal_code
+          this.DEFAULT_ADDRESS.country,          // address.country
+          this.DEFAULT_ADDRESS.latitude,         // latitude
+          this.DEFAULT_ADDRESS.longitude,        // longitude
         ];
+
+        // Validar que la fila tenga exactamente el mismo número de columnas que el header
+        if (row.length !== columns.length) {
+          skippedCount++;
+          logger.error(`[MetaFeed] Vehículo ${vehicle.id} omitido: número de columnas incorrecto (${row.length} vs ${columns.length})`);
+          continue;
+        }
 
         // Escapar todos los campos
         const escapedRow = row.map(field => this.escapeCsvField(field));
@@ -392,8 +485,11 @@ export class MetaFeedService {
     }
 
     // Unir filas con saltos de línea
+    // IMPORTANTE: No agregar BOM aquí, el controlador lo hace
     const csvContent = rows.map(row => row.join(',')).join('\n');
 
+    // Log del header generado para debugging
+    logger.info(`[MetaFeed] Header generado: ${columns.join(',')}`);
     logger.info(`[MetaFeed] Feed generado: ${includedCount} vehículos incluidos, ${skippedCount} omitidos`);
 
     return csvContent;

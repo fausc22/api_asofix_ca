@@ -18,6 +18,7 @@
 # Carpeta de uploads (fotos de vehículos)
 uploads/
 uploads/**/*
+src/config/
 
 # ============================================
 # Dependencias

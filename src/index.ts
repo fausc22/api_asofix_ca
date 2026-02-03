@@ -9,8 +9,11 @@ import feedsRoutes from './routes/feeds.routes';
 import auditRoutes from './routes/audit.routes';
 import asofixRoutes from './routes/asofix.routes';
 import leadsRoutes from './routes/leads.routes';
+import recibosRoutes from './routes/recibos.routes';
+import stockRoutes from './routes/stock.routes';
 import logger from './services/logger';
 import syncCronJob from './jobs/sync-cron';
+import stockCronJob from './jobs/stock-cron';
 import { VehicleFilters } from './services/vehicle-filters';
 import pool from './config/database';
 
@@ -163,6 +166,8 @@ app.use('/feeds', feedsRoutes);
 app.use('/internal', auditRoutes);
 app.use('/api/leads', leadsRoutes);
 app.use('/asofix', asofixRoutes);
+app.use('/api/recibos', recibosRoutes);
+app.use('/api/stock', stockRoutes);
 
 // Ruta de salud
 app.get('/health', async (req, res) => {
@@ -231,7 +236,8 @@ app.get('/health', async (req, res) => {
     uptime_seconds: uptimeSeconds,
     database: dbStatus,
     last_successful_sync_at: lastSuccessfulSync,
-    cron_active: syncCronJob.isActive()
+    sync_cron_active: syncCronJob.isActive(),
+    stock_cron_active: stockCronJob.isActive()
   });
 });
 
@@ -283,6 +289,8 @@ app.listen(PORT, () => {
   logger.info(`📋 Información de filtros: http://localhost:${PORT}/filters/info`);
   logger.info(`🔍 Endpoint de auditoría: http://localhost:${PORT}/internal/vehicles/audit`);
   logger.info(`🖼️  Medios estáticos: http://localhost:${PORT}/media/images/* y /media/videos/*`);
+  logger.info(`📄 Endpoints de recibos: http://localhost:${PORT}/api/recibos/*`);
+  logger.info(`📊 Endpoints de stock: http://localhost:${PORT}/api/stock/*`);
   logger.info(`📁 MEDIA_ROOT: ${MEDIA_ROOT}`);
   logger.info(`📁 IMAGES_PATH: ${IMAGES_PATH}`);
   logger.info(`📁 VIDEOS_PATH: ${VIDEOS_PATH}`);
@@ -310,9 +318,18 @@ app.listen(PORT, () => {
   const enableCron = process.env.ENABLE_AUTO_SYNC !== 'false';
   if (enableCron) {
     syncCronJob.start();
-    logger.info('Cron job de sincronización automática iniciado');
+    logger.info('✅ Cron job de sincronización automática iniciado');
   } else {
     logger.info('Cron job de sincronización automática deshabilitado (ENABLE_AUTO_SYNC=false)');
+  }
+
+  // Iniciar cron job de stock automático
+  const enableStockCron = process.env.ENABLE_STOCK_CRON !== 'false';
+  if (enableStockCron) {
+    stockCronJob.start();
+    logger.info('✅ Cron job de stock iniciado (cada hora a los 30 minutos)');
+  } else {
+    logger.info('Cron job de stock deshabilitado (ENABLE_STOCK_CRON=false)');
   }
 });
 

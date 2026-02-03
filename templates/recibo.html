@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RECIBO - CAR ADVICE</title>
+    <style>
+        @font-face {
+            font-family: 'Antenna';
+            src: url('{{antenna_light_base64}}') format('opentype');
+            font-weight: 300;
+            font-style: normal;
+        }
+        
+        @font-face {
+            font-family: 'Antenna';
+            src: url('{{antenna_medium_base64}}') format('opentype');
+            font-weight: 500;
+            font-style: normal;
+        }
+        
+        @font-face {
+            font-family: 'Antenna';
+            src: url('{{antenna_bold_base64}}') format('opentype');
+            font-weight: 700;
+            font-style: normal;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        @page {
+            size: A4 portrait;
+            margin: 15mm 20mm;
+        }
+        
+        body {
+            font-family: 'Antenna', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica', Arial, sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #000000;
+            background-color: #ffffff;
+        }
+        
+        .container {
+            max-width: 750px;
+            margin: 0 auto;
+            padding: 0;
+            background: white;
+        }
+        
+        .page {
+            min-height: 100vh;
+            max-height: 100vh;
+            page-break-after: always;
+            page-break-inside: avoid;
+            display: flex;
+            flex-direction: column;
+            padding: 15px 25px;
+            position: relative;
+        }
+        
+        .page:last-child {
+            page-break-after: auto;
+        }
+        
+        .page-title {
+            text-align: center;
+            font-size: 16px;
+            font-weight: 700;
+            color: #FF6B00;
+            margin-bottom: 12px;
+            padding: 6px;
+            border: 2px solid #FF6B00;
+            border-radius: 6px;
+            background: #FFF7ED;
+        }
+        
+        .content-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .spacer {
+            flex: 1;
+        }
+        
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #FF6B00;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex: 1;
+        }
+        
+        .logo {
+            width: 60px;
+            height: 60px;
+            object-fit: contain;
+        }
+        
+        .company-info {
+            flex: 1;
+        }
+        
+        .company-name {
+            font-size: 24px;
+            font-weight: 800;
+            color: #FF6B00;
+            letter-spacing: -0.5px;
+            margin-bottom: 4px;
+        }
+        
+        .company-details {
+            font-size: 12px;
+            color: #666666;
+            line-height: 1.5;
+        }
+        
+        .company-details-line {
+            margin: 2px 0;
+        }
+        
+        .company-details-bold {
+            font-weight: 600;
+        }
+        
+        .company-phone {
+            font-weight: 600;
+            color: #FF6B00;
+        }
+        
+        .header-right {
+            text-align: right;
+            min-width: 140px;
+        }
+        
+        .receipt-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #FF6B00;
+            margin-bottom: 4px;
+        }
+        
+        .receipt-number-label {
+            font-size: 11px;
+            color: #666666;
+        }
+        
+        .receipt-number {
+            font-size: 24px;
+            font-weight: 800;
+            color: #000000;
+            margin: 4px 0;
+        }
+        
+        .receipt-date {
+            font-size: 12px;
+            color: #666666;
+            font-weight: 500;
+            margin-top: 6px;
+        }
+        
+        /* Separator */
+        .separator {
+            height: 1px;
+            background-color: #E0E0E0;
+            margin: 8px 0;
+        }
+        
+        /* Info Grid */
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        
+        .info-item {
+            font-size: 14px;
+        }
+        
+        .info-label {
+            color: #FF6B00;
+            font-weight: 600;
+            display: inline;
+        }
+        
+        .info-value {
+            color: #000000;
+            font-weight: 400;
+            display: inline;
+            margin-left: 4px;
+        }
+        
+        .info-value-bold {
+            font-weight: 500;
+        }
+        
+        /* Concepto Section */
+        .concepto-section {
+            margin: 8px 0;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        
+        .concepto-label {
+            color: #FF6B00;
+            font-weight: 600;
+            display: inline;
+        }
+        
+        .concepto-value {
+            color: #000000;
+            display: inline;
+            margin-left: 4px;
+        }
+        
+        /* Amount Box */
+        .amount-box {
+            background-color: #FFF7ED;
+            border: 2px solid #FF6B00;
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin: 8px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .amount-label {
+            font-size: 12px;
+            font-weight: 700;
+            color: #FF6B00;
+        }
+        
+        .amount-value {
+            font-size: 20px;
+            font-weight: 800;
+            color: #FF6B00;
+            letter-spacing: -0.5px;
+        }
+        
+        /* Details Grid */
+        .details-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 8px;
+        }
+        
+        .detail-item {
+            font-size: 12px;
+        }
+        
+        .detail-label {
+            color: #FF6B00;
+            font-weight: 600;
+            display: block;
+            margin-bottom: 3px;
+            font-size: 11px;
+        }
+        
+        .detail-value {
+            color: #000000;
+            font-weight: 400;
+        }
+        
+        .detail-value-bold {
+            font-weight: 500;
+        }
+        
+        /* Payment Breakdown */
+        .payment-breakdown {
+            margin-top: 8px;
+            margin-bottom: 8px;
+        }
+        
+        .payment-breakdown .detail-label {
+            color: #FF6B00;
+            font-weight: 600;
+            display: block;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+        
+        .payment-breakdown-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 12px;
+            border-bottom: 1px solid #E6E6E6;
+        }
+        
+        .payment-breakdown-item:last-child {
+            border-bottom: none;
+        }
+        
+        /* Signatures */
+        .signatures {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+        
+        .signature-box {
+            min-height: 70px;
+            border-top: 2px solid #000000;
+            padding-top: 10px;
+            text-align: center;
+        }
+        
+        .signature-text {
+            font-size: 11px;
+            font-weight: 500;
+            color: #646464;
+        }
+        
+        /* Footer */
+        .footer {
+            text-align: center;
+            margin-top: 10px;
+            padding-top: 8px;
+            border-top: 1px solid #E0E0E0;
+        }
+        
+        .footer-logo {
+            width: 50px;
+            height: 50px;
+            opacity: 1.0;
+        }
+        
+        /* Print styles */
+        @media print {
+            body {
+                margin: 0;
+                padding: 0;
+            }
+            
+            .container {
+                padding: 0;
+            }
+            
+            @page {
+                margin: 15mm;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- PÁGINA 1: ORIGINAL -->
+        <div class="page">
+            <div class="page-title">ORIGINAL</div>
+            
+            <div class="content-wrapper">
+                <!-- Header -->
+                <div class="header">
+            <div class="header-left">
+                <img src="{{logo_base64}}" alt="Car Advice" class="logo" />
+                <div class="company-info">
+                    <div class="company-name">CAR ADVICE</div>
+                    <div class="company-details">
+                        <div class="company-details-line company-details-bold">Casa Central: Octavio Pinto 3024</div>
+                        <div class="company-details-line company-phone">Telefono:351-515-8848</div>
+                    </div>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="receipt-title">RECIBO</div>
+                <div class="receipt-number-label">Nº</div>
+                <div class="receipt-number">{{nro}}</div>
+                <div class="receipt-date">Fecha: {{fecha}}</div>
+            </div>
+        </div>
+
+        <!-- Separator -->
+        <div class="separator"></div>
+
+        <!-- Client Info -->
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">Recibí de:</span>
+                <span class="info-value info-value-bold">{{cliente}}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Localidad:</span>
+                <span class="info-value">{{localidad}}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Dirección:</span>
+                <span class="info-value">{{direccion}}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">DNI/CUIT:</span>
+                <span class="info-value">{{doc}}</span>
+            </div>
+        </div>
+
+        <!-- Separator -->
+        <div class="separator"></div>
+
+        <!-- Concepto -->
+        <div class="concepto-section">
+            <span class="concepto-label">Concepto:</span>
+            <span class="concepto-value">{{concepto}}</span>
+        </div>
+
+        <!-- Amount Box -->
+        {{totales_html}}
+
+                <!-- Separator -->
+                <div class="separator"></div>
+
+                <!-- Desglose de formas de pago (si existe) -->
+                {{formas_pago_html}}
+
+                <!-- Payment Details (compatibilidad con formato antiguo) -->
+                <div class="details-grid" style="{{mostrar_detalles_antiguos}}">
+                    <div class="detail-item">
+                        <span class="detail-label">Medio de pago</span>
+                        <span class="detail-value detail-value-bold">{{medio}}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Detalles</span>
+                        <span class="detail-value">{{detalles}}</span>
+                    </div>
+                </div>
+
+        <div class="details-grid" style="margin-top: 6px;">
+            <div class="detail-item">
+                <span class="detail-label">Vendedor</span>
+                <span class="detail-value">{{vendedor}}</span>
+            </div>
+            <div class="detail-item">
+                <span class="detail-label">Vehículo</span>
+                <span class="detail-value">{{vehiculo}}</span>
+            </div>
+        </div>
+
+                <!-- Spacer para empujar firmas al final -->
+                <div class="spacer"></div>
+
+                <!-- Signatures -->
+                <div class="signatures">
+                    <div class="signature-box">
+                        <div class="signature-text">Firma del cliente</div>
+                    </div>
+                    <div class="signature-box">
+                        <div class="signature-text">Firma / Sello Car Advice — Tesorería</div>
+                    </div>
+                </div>
+
+                <!-- Footer -->
+                <div class="footer">
+                    <img src="{{footer_logo_base64}}" alt="Car Advice" class="footer-logo" />
+                </div>
+            </div>
+        </div>
+
+        <!-- PÁGINA 2: DUPLICADO -->
+        <div class="page">
+            <div class="page-title">DUPLICADO</div>
+            
+            <div class="content-wrapper">
+                <!-- Header -->
+                <div class="header">
+                    <div class="header-left">
+                        <img src="{{logo_base64}}" alt="Car Advice" class="logo" />
+                        <div class="company-info">
+                            <div class="company-name">CAR ADVICE</div>
+                            <div class="company-details">
+                                <div class="company-details-line company-details-bold">Casa Central: Octavio Pinto 3024</div>
+                                <div class="company-details-line company-phone">&#9742; 351-515-8848</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="header-right">
+                        <div class="receipt-title">RECIBO</div>
+                        <div class="receipt-number-label">Nº</div>
+                        <div class="receipt-number">{{nro}}</div>
+                        <div class="receipt-date">Fecha: {{fecha}}</div>
+                    </div>
+                </div>
+
+                <!-- Separator -->
+                <div class="separator"></div>
+
+                <!-- Client Info -->
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">Recibí de:</span>
+                        <span class="info-value info-value-bold">{{cliente}}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Localidad:</span>
+                        <span class="info-value">{{localidad}}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Dirección:</span>
+                        <span class="info-value">{{direccion}}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">DNI/CUIT:</span>
+                        <span class="info-value">{{doc}}</span>
+                    </div>
+                </div>
+
+                <!-- Separator -->
+                <div class="separator"></div>
+
+                <!-- Concepto -->
+                <div class="concepto-section">
+                    <span class="concepto-label">Concepto:</span>
+                    <span class="concepto-value">{{concepto}}</span>
+                </div>
+
+                <!-- Amount Box -->
+                {{totales_html}}
+
+                <!-- Separator -->
+                <div class="separator"></div>
+
+                <!-- Desglose de formas de pago (si existe) -->
+                {{formas_pago_html}}
+
+                <!-- Payment Details (compatibilidad con formato antiguo) -->
+                <div class="details-grid" style="{{mostrar_detalles_antiguos}}">
+                    <div class="detail-item">
+                        <span class="detail-label">Medio de pago</span>
+                        <span class="detail-value detail-value-bold">{{medio}}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Detalles</span>
+                        <span class="detail-value">{{detalles}}</span>
+                    </div>
+                </div>
+
+                <div class="details-grid" style="margin-top: 6px;">
+                    <div class="detail-item">
+                        <span class="detail-label">Vendedor</span>
+                        <span class="detail-value">{{vendedor}}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Vehículo</span>
+                        <span class="detail-value">{{vehiculo}}</span>
+                    </div>
+                </div>
+
+                <!-- Spacer para empujar firmas al final -->
+                <div class="spacer"></div>
+
+                <!-- Signatures -->
+                <div class="signatures">
+                    <div class="signature-box">
+                        <div class="signature-text">Firma del cliente</div>
+                    </div>
+                    <div class="signature-box">
+                        <div class="signature-text">Firma / Sello Car Advice — Tesorería</div>
+                    </div>
+                </div>
+
+                <!-- Footer -->
+                <div class="footer">
+                    <img src="{{footer_logo_base64}}" alt="Car Advice" class="footer-logo" />
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+
