@@ -19,6 +19,9 @@
 uploads/
 uploads/**/*
 src/config/
+# Service Account (credenciales Google, no subir)
+**/service-account.json
+config/service-account.json
 
 # ============================================
 # Dependencias

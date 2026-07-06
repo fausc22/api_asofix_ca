@@ -449,6 +449,22 @@ class SyncService {
         }
         
         // El vehículo sigue siendo válido - actualizar last_synced_at
+        // Aún así comprobar si faltan imágenes en vehicle_images (ej. borradas a mano) y reponer en pending_images
+        const existingId = await this.findVehicleByAsofixId(asofixId);
+        if (existingId) {
+          const newImageUrls = (vehicle.images || []).map((img: any) => img.url || '').filter((url: string) => url);
+          const [existingImages] = await pool.execute<any[]>(
+            'SELECT image_url FROM vehicle_images WHERE vehicle_id = ?',
+            [existingId]
+          );
+          const existingUrls = existingImages.map((img: any) => img.image_url).filter((url: string) => url);
+          const existingUrlsSet = new Set(existingUrls);
+          const urlsToAdd = newImageUrls.filter((url: string) => !existingUrlsSet.has(url));
+          if (urlsToAdd.length > 0) {
+            await this.savePendingImages(existingId, urlsToAdd);
+            logger.info(`Repuestas ${urlsToAdd.length} URLs en pending_images para vehículo ${existingId} (imágenes faltantes)`);
+          }
+        }
         await pool.execute(
           'UPDATE vehicles SET last_synced_at = NOW() WHERE asofix_id = ?',
           [asofixId]

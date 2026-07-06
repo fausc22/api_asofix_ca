@@ -1,6 +1,6 @@
 /**
  * Servicio para interactuar con BigQuery y Google Sheets/Drive
- * Maneja consultas de stock y generación de Excel
+ * Usa Service Account para Sheets/Drive (sin token ni renovación manual)
  */
 import { BigQuery } from '@google-cloud/bigquery';
 import ExcelJS from 'exceljs';
@@ -9,32 +9,6 @@ import path from 'path';
 import { google } from 'googleapis';
 import { getGoogleConfig } from '../config/google.config';
 import logger from './logger';
-
-interface TokenData {
-  access_token: string;
-  refresh_token: string;
-  scope: string;
-  token_type: string;
-  expiry_date: number;
-  refresh_token_expires_in?: number;
-}
-
-interface CredentialsData {
-  installed?: {
-    client_id: string;
-    client_secret: string;
-    redirect_uris: string[];
-  };
-  web?: {
-    client_id: string;
-    client_secret: string;
-    redirect_uris: string[];
-  };
-  client_id?: string;
-  client_secret?: string;
-  redirect_uris?: string[];
-  redirect_uri?: string;
-}
 
 interface StockRow {
   [key: string]: any;
@@ -50,154 +24,53 @@ interface ColumnMapping {
 class BigQueryService {
   private bigquery: BigQuery | null = null;
   private datasetId = 'Car_Advice_reports';
-  private tokenPath: string;
-  private credentialsPath: string;
+  private serviceAccountPath: string;
   private bigQueryCredentialsPath: string;
   private config: ReturnType<typeof getGoogleConfig>;
 
   constructor() {
     this.config = getGoogleConfig();
-    this.tokenPath = this.config.TOKEN_PATH;
-    this.credentialsPath = this.config.CREDENTIALS_PATH;
+    this.serviceAccountPath = this.config.SERVICE_ACCOUNT_PATH;
     
-    // Obtener directorio base usando la misma lógica que google.config
-    const fs = require('fs');
+    const fsSync = require('fs');
     const currentDir = __dirname;
-    
     const possibleRoots = [
       path.join(currentDir, '../..'),
       path.join(process.cwd(), 'backend'),
       process.cwd(),
       path.dirname(require.main?.filename || __dirname),
     ];
-    
     let projectRoot = path.join(currentDir, '../..');
     for (const root of possibleRoots) {
       const configPath = path.join(root, 'config');
-      if (fs.existsSync(configPath)) {
+      if (fsSync.existsSync(configPath)) {
         projectRoot = root;
         break;
       }
     }
-    
     this.bigQueryCredentialsPath = path.join(projectRoot, 'config', 'asofix-produccion-caradvice.json');
   }
 
   /**
-   * Verificar si el token está expirado o próximo a expirar
+   * Autenticación con Google usando Service Account (Sheets/Drive)
+   * No requiere token ni renovación manual
    */
-  private isTokenExpired(token: TokenData): boolean {
-    if (!token || !token.expiry_date) {
-      return true;
+  private async getSheetsAuth(): Promise<any> {
+    const fsSync = require('fs');
+    if (!fsSync.existsSync(this.serviceAccountPath)) {
+      throw new Error(
+        `No se encontró el archivo de Service Account en: ${this.serviceAccountPath}. ` +
+        'Agrega service-account.json en config/ y comparte los Sheets con el email del Service Account como Editor.'
+      );
     }
-    
-    const expiryTime = token.expiry_date - 300000; // 5 minutos antes
-    const now = Date.now();
-    
-    return now >= expiryTime;
-  }
-
-  /**
-   * Guardar token en archivo
-   */
-  private async saveToken(token: TokenData, tokenPath: string): Promise<void> {
-    try {
-      await fs.writeFile(tokenPath, JSON.stringify(token, null, 2), { encoding: 'utf-8' });
-      logger.info('✅ Token guardado exitosamente');
-    } catch (error: any) {
-      logger.error('❌ Error guardando token:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Renovar token automáticamente usando refresh_token
-   * SIEMPRE renueva el token cada vez que se usa para mantenerlo fresco
-   * Esto evita que el refresh_token expire y mantiene el token siempre actualizado
-   */
-  private async refreshTokenAlways(oAuth2Client: any, tokenPath: string): Promise<any> {
-    try {
-      const token = oAuth2Client.credentials as TokenData;
-      
-      if (!token.refresh_token) {
-        throw new Error('No hay refresh_token disponible. Necesitas reautenticarte.');
-      }
-
-      logger.info('🔄 Renovando token automáticamente (renovación en cada uso)...');
-
-      const { credentials: newCredentials } = await oAuth2Client.refreshAccessToken();
-      
-      // Guardar el nuevo refresh_token si Google lo devuelve (puede actualizarse)
-      const updatedToken: TokenData = {
-        ...newCredentials,
-        // Si Google devuelve un nuevo refresh_token, usarlo; sino mantener el actual
-        refresh_token: newCredentials.refresh_token || token.refresh_token
-      };
-
-      oAuth2Client.setCredentials(updatedToken);
-      await this.saveToken(updatedToken, tokenPath);
-
-      logger.info('✅ Token renovado y guardado exitosamente');
-      
-      return oAuth2Client;
-    } catch (error: any) {
-      logger.error('❌ Error renovando token:', error);
-      
-      if (error.message && (
-        error.message.includes('invalid_grant') ||
-        error.message.includes('Token has been expired or revoked')
-      )) {
-        throw new Error(
-          'El refresh_token ha expirado o fue revocado. ' +
-          'Necesitas eliminar token.json y volver a autenticarte manualmente una vez.'
-        );
-      }
-      
-      throw error;
-    }
-  }
-
-  /**
-   * Ejecutar operación con reintento automático si falla por token
-   * Nota: El token ya fue renovado en authenticateGoogle(), pero este método
-   * actúa como respaldo en caso de errores durante la operación
-   */
-  private async executeWithRetry<T>(
-    operation: (oAuth2Client: any) => Promise<T>,
-    oAuth2Client: any,
-    tokenPath: string,
-    maxRetries: number = 1
-  ): Promise<T> {
-    let lastError: any;
-    
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        // El token ya fue renovado en authenticateGoogle(), pero por seguridad
-        // intentamos renovarlo nuevamente si hay un error de autenticación
-        if (attempt > 0) {
-          await this.refreshTokenAlways(oAuth2Client, tokenPath);
-        }
-        return await operation(oAuth2Client);
-      } catch (error: any) {
-        lastError = error;
-        const errorMessage = error.message || '';
-        
-        if (
-          (errorMessage.includes('invalid_grant') ||
-           errorMessage.includes('Token has been expired') ||
-           errorMessage.includes('Request had invalid authentication credentials')) &&
-          attempt < maxRetries
-        ) {
-          logger.info(`🔄 Error de autenticación detectado. Reintentando (intento ${attempt + 1}/${maxRetries + 1})...`);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          continue;
-        }
-        
-        throw error;
-      }
-    }
-    
-    throw lastError;
+    const auth = new google.auth.GoogleAuth({
+      keyFile: this.serviceAccountPath,
+      scopes: [
+        'https://www.googleapis.com/auth/drive', // drive.file solo ve archivos creados por la app; drive permite ver archivos compartidos con la SA
+        'https://www.googleapis.com/auth/spreadsheets'
+      ]
+    });
+    return await auth.getClient();
   }
 
   /**
@@ -428,70 +301,7 @@ class BigQueryService {
   }
 
   /**
-   * Autenticar con Google
-   * Configura el listener ANTES de establecer credenciales para capturar todas las renovaciones
-   * SIEMPRE renueva el token al autenticar para mantenerlo fresco
-   */
-  async authenticateGoogle(): Promise<any> {
-    const tokenPath = this.tokenPath;
-    
-    const credentialsContent = await fs.readFile(this.credentialsPath, { encoding: 'utf-8' });
-    const credentials = JSON.parse(credentialsContent) as CredentialsData;
-
-    let client_secret: string;
-    let client_id: string;
-    let redirect_uris: string[];
-
-    if (credentials.installed) {
-      ({ client_secret, client_id, redirect_uris } = credentials.installed);
-    } else if (credentials.web) {
-      ({ client_secret, client_id, redirect_uris } = credentials.web);
-    } else {
-      client_secret = credentials.client_secret!;
-      client_id = credentials.client_id!;
-      redirect_uris = credentials.redirect_uris || (credentials.redirect_uri ? [credentials.redirect_uri] : []);
-    }
-
-    const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
-
-    try {
-      const tokenContent = await fs.readFile(tokenPath, { encoding: 'utf-8' });
-      const token = JSON.parse(tokenContent) as TokenData;
-
-      // Configurar listener ANTES de establecer credenciales para capturar todas las renovaciones
-      oAuth2Client.on('tokens', async (tokens: any) => {
-        try {
-          const currentCredentials = oAuth2Client.credentials as TokenData;
-          
-          const updatedToken: TokenData = {
-            ...currentCredentials,
-            ...tokens,
-            // Preservar refresh_token: usar el nuevo si viene, sino mantener el actual
-            refresh_token: tokens.refresh_token || currentCredentials.refresh_token || token.refresh_token
-          };
-
-          await this.saveToken(updatedToken, tokenPath);
-          logger.info('🔄 Token renovado automáticamente por listener y guardado');
-        } catch (error: any) {
-          logger.error('⚠️ Error guardando token desde listener:', error);
-        }
-      });
-
-      // Establecer credenciales iniciales
-      oAuth2Client.setCredentials(token);
-
-      // SIEMPRE renovar el token al autenticar (renovación diaria)
-      // Esto mantiene el token fresco y evita que el refresh_token expire
-      await this.refreshTokenAlways(oAuth2Client, tokenPath);
-
-      return oAuth2Client;
-    } catch (error: any) {
-      throw new Error(`No se pudo autenticar con Google - ${error.message}`);
-    }
-  }
-
-  /**
-   * Subir o actualizar archivo en Google Sheets
+   * Subir o actualizar archivo en Google Sheets (usa Service Account)
    */
   async uploadOrUpdateGoogleSheets(
     excelFilePath: string,
@@ -502,79 +312,64 @@ class BigQueryService {
     try {
       logger.info('📤 Actualizando archivo en Google Drive...');
 
-      const tokenPath = this.tokenPath;
-      let auth = await this.authenticateGoogle();
-      
-      // El token ya fue renovado en authenticateGoogle(), pero por seguridad
-      // ejecutamos con retry por si hay algún problema durante la operación
-      return await this.executeWithRetry(async (oAuth2Client) => {
-        auth = oAuth2Client;
-        const drive = google.drive({ version: 'v3', auth });
-        const sheets = google.sheets({ version: 'v4', auth });
+      const auth = await this.getSheetsAuth();
+      const drive = google.drive({ version: 'v3', auth });
+      const sheets = google.sheets({ version: 'v4', auth });
 
-        const results: any[] = [];
+      const results: any[] = [];
 
-        try {
-          logger.info(`🔍 Verificando acceso al archivo...`);
-          const fileInfo = await drive.files.get({
-            fileId: specificFileId,
-            fields: 'id, name, permissions'
-          });
+      try {
+        logger.info(`🔍 Verificando acceso al archivo...`);
+        const fileInfo = await drive.files.get({
+          fileId: specificFileId,
+          fields: 'id, name, permissions'
+        });
 
-          logger.info(`✅ Acceso confirmado: "${fileInfo.data.name}"`);
+        logger.info(`✅ Acceso confirmado: "${fileInfo.data.name}"`);
 
-          logger.info(`🔄 Actualizando contenido...`);
-          const updatedUrl = await this.updateSpecificSheet(sheets, specificFileId, data, sheetName);
+        logger.info(`🔄 Actualizando contenido...`);
+        const updatedUrl = await this.updateSpecificSheet(sheets, specificFileId, data, sheetName);
 
-          results.push({
-            destination: 'archivo específico',
-            fileId: specificFileId,
-            url: updatedUrl,
-            action: 'actualizado'
-          });
+        results.push({
+          destination: 'archivo específico',
+          fileId: specificFileId,
+          url: updatedUrl,
+          action: 'actualizado'
+        });
 
-          logger.info('\n✅ Proceso completado!');
-          results.forEach(result => {
-            logger.info(`📊 ${result.destination}: ${result.action} - ${result.url}`);
-          });
+        logger.info('\n✅ Proceso completado!');
+        results.forEach(result => {
+          logger.info(`📊 ${result.destination}: ${result.action} - ${result.url}`);
+        });
 
-          return {
-            results: results,
-            mainUrl: results[0]?.url
-          };
+        return {
+          results: results,
+          mainUrl: results[0]?.url
+        };
 
-        } catch (accessError: any) {
-          const errorMessage = accessError.message || '';
-          const isInvalidGrant = errorMessage.includes('invalid_grant') || 
-                                errorMessage.includes('Token has been expired or revoked');
-          
-          if (isInvalidGrant) {
-            throw accessError;
-          } else {
-            logger.info(`❌ No se puede acceder al archivo específico: ${errorMessage}`);
-            logger.info(`📝 Creando archivo en tu Drive como respaldo...`);
+      } catch (accessError: any) {
+        const errorMessage = accessError.message || '';
+        logger.info(`❌ No se puede acceder al archivo específico: ${errorMessage}`);
+        logger.info(`📝 Creando archivo en Drive como respaldo...`);
 
-            const newFile = await this.createNewSheet(drive, sheetName, excelFilePath, null);
-            results.push({
-              destination: 'tu Drive (respaldo)',
-              fileId: newFile.fileId,
-              url: newFile.url,
-              action: 'creado como respaldo'
-            });
+        const newFile = await this.createNewSheet(drive, sheetName, excelFilePath, null);
+        results.push({
+          destination: 'Drive (respaldo)',
+          fileId: newFile.fileId,
+          url: newFile.url,
+          action: 'creado como respaldo'
+        });
 
-            logger.info('\n✅ Proceso completado!');
-            results.forEach(result => {
-              logger.info(`📊 ${result.destination}: ${result.action} - ${result.url}`);
-            });
+        logger.info('\n✅ Proceso completado!');
+        results.forEach(result => {
+          logger.info(`📊 ${result.destination}: ${result.action} - ${result.url}`);
+        });
 
-            return {
-              results: results,
-              mainUrl: results[0]?.url
-            };
-          }
-        }
-      }, auth, tokenPath);
-
+        return {
+          results: results,
+          mainUrl: results[0]?.url
+        };
+      }
     } catch (error: any) {
       logger.error('❌ Error actualizando Google Sheets:', error);
       throw error;

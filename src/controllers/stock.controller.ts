@@ -146,10 +146,11 @@ export class StockController {
       try {
         await fs.access(credentialsPath);
       } catch {
-        return res.status(404).json({
+        res.status(404).json({
           success: false,
           error: `No se encontró el archivo de credenciales en: ${credentialsPath}`
         });
+        return;
       }
 
       // Leer credenciales
@@ -171,10 +172,11 @@ export class StockController {
       }
 
       if (!client_id || !client_secret) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           error: 'client_id o client_secret no encontrados en credentials.json'
         });
+        return;
       }
 
       const oAuth2Client = new google.auth.OAuth2(
@@ -223,10 +225,11 @@ export class StockController {
       const { code } = req.body;
 
       if (!code) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           error: 'El código de autorización es requerido. Envía { "code": "tu_codigo" }'
         });
+        return;
       }
 
       const config = getGoogleConfig();

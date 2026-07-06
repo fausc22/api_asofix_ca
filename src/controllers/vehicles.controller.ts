@@ -412,9 +412,9 @@ export class VehiclesController {
       const vehicle = vehicles[0];
       const vehicleId = vehicle.id;
       
-      // Obtener imágenes
+      // Obtener imágenes (orden por sort_order para permitir orden personalizado)
       const [images] = await pool.execute<any[]>(
-        'SELECT image_url, file_path FROM vehicle_images WHERE vehicle_id = ? ORDER BY id',
+        'SELECT id, image_url, file_path FROM vehicle_images WHERE vehicle_id = ? ORDER BY sort_order ASC, id ASC',
         [vehicleId]
       );
       

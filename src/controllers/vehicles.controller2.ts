@@ -414,7 +414,7 @@ export class VehiclesController {
       
       // Obtener imágenes
       const [images] = await pool.execute<any[]>(
-        'SELECT image_url, file_path FROM vehicle_images WHERE vehicle_id = ? ORDER BY id',
+        'SELECT image_url, file_path FROM vehicle_images WHERE vehicle_id = ? ORDER BY sort_order ASC, id ASC',
         [vehicleId]
       );
       

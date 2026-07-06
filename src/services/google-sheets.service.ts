@@ -1,38 +1,10 @@
 /**
- * Servicio para interactuar con Google Sheets
- * Maneja autenticación OAuth2 con refresh automático de tokens
+ * Servicio para interactuar con Google Sheets (Recibos)
+ * Usa Service Account para autenticación (sin token ni renovación manual)
  */
 import { google } from 'googleapis';
-import fs from 'fs/promises';
-import path from 'path';
 import { getGoogleConfig } from '../config/google.config';
 import logger from './logger';
-
-interface TokenData {
-  access_token: string;
-  refresh_token: string;
-  scope: string;
-  token_type: string;
-  expiry_date: number;
-  refresh_token_expires_in?: number;
-}
-
-interface CredentialsData {
-  installed?: {
-    client_id: string;
-    client_secret: string;
-    redirect_uris: string[];
-  };
-  web?: {
-    client_id: string;
-    client_secret: string;
-    redirect_uris: string[];
-  };
-  client_id?: string;
-  client_secret?: string;
-  redirect_uris?: string[];
-  redirect_uri?: string;
-}
 
 interface ReceiptData {
   nro: string;
@@ -66,263 +38,48 @@ interface WriteReceiptResult {
 class GoogleSheetsService {
   private auth: any = null;
   private sheets: any = null;
-  private tokenPath: string;
-  private credentialsPath: string;
+  private serviceAccountPath: string;
   private config: ReturnType<typeof getGoogleConfig>;
 
   constructor() {
     this.config = getGoogleConfig();
-    this.tokenPath = this.config.TOKEN_PATH;
-    this.credentialsPath = this.config.CREDENTIALS_PATH;
+    this.serviceAccountPath = this.config.SERVICE_ACCOUNT_PATH;
     
-    logger.info(`📁 Configuración de Google Sheets inicializada:`);
-    logger.info(`   - Credenciales: ${this.credentialsPath}`);
-    logger.info(`   - Token: ${this.tokenPath}`);
+    logger.info(`📁 Configuración de Google Sheets (Service Account): ${this.serviceAccountPath}`);
   }
 
   /**
-   * Verificar si el token está expirado o próximo a expirar
-   * Consideramos expirado si falta menos de 5 minutos
+   * Autenticación con Google usando Service Account
+   * No requiere token ni renovación manual
    */
-  private isTokenExpired(token: TokenData): boolean {
-    if (!token || !token.expiry_date) {
-      return true;
+  private async ensureAuth(): Promise<void> {
+    if (this.sheets && this.auth) {
+      return;
     }
-    
-    // Agregar margen de 5 minutos (300000 ms) antes de la expiración
-    const expiryTime = token.expiry_date - 300000;
-    const now = Date.now();
-    
-    return now >= expiryTime;
-  }
-
-  /**
-   * Guardar token en archivo
-   */
-  private async saveToken(token: TokenData): Promise<void> {
-    try {
-      await fs.writeFile(
-        this.tokenPath,
-        JSON.stringify(token, null, 2),
-        { encoding: 'utf-8' }
+    const fsSync = require('fs');
+    if (!fsSync.existsSync(this.serviceAccountPath)) {
+      throw new Error(
+        `No se encontró el archivo de Service Account en: ${this.serviceAccountPath}. ` +
+        'Agrega service-account.json en config/ y comparte el Sheet de Recibos con el email del Service Account como Editor.'
       );
-      logger.info('✅ Token guardado exitosamente');
-    } catch (error: any) {
-      logger.error('❌ Error guardando token:', error);
-      throw error;
     }
+    const authClient = new google.auth.GoogleAuth({
+      keyFile: this.serviceAccountPath,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets']
+    });
+    this.auth = await authClient.getClient();
+    this.sheets = google.sheets({ version: 'v4', auth: this.auth });
   }
 
   /**
-   * Renovar token automáticamente usando refresh_token
-   */
-  private async refreshTokenIfNeeded(oAuth2Client: any): Promise<any> {
-    try {
-      // Obtener credenciales actuales
-      const token = oAuth2Client.credentials as TokenData;
-      
-      // Si no hay refresh_token, no podemos renovar
-      if (!token.refresh_token) {
-        throw new Error('No hay refresh_token disponible. Necesitas reautenticarte.');
-      }
-
-      // Verificar si necesita renovación
-      if (!this.isTokenExpired(token)) {
-        return oAuth2Client; // Token todavía válido
-      }
-
-      logger.info('🔄 Token expirado o próximo a expirar. Renovando automáticamente...');
-
-      // Renovar el token usando refresh_token
-      const { credentials: newCredentials } = await oAuth2Client.refreshAccessToken();
-      
-      // Combinar con el refresh_token original para mantenerlo
-      const updatedToken: TokenData = {
-        ...newCredentials,
-        refresh_token: token.refresh_token // Mantener el refresh_token original
-      };
-
-      // Actualizar credenciales del cliente
-      oAuth2Client.setCredentials(updatedToken);
-
-      // Guardar token actualizado
-      await this.saveToken(updatedToken);
-
-      logger.info('✅ Token renovado y guardado automáticamente');
-      
-      return oAuth2Client;
-    } catch (error: any) {
-      logger.error('❌ Error renovando token:', error);
-      
-      // Si el refresh_token está inválido o expirado
-      if (error.message && (
-        error.message.includes('invalid_grant') ||
-        error.message.includes('Token has been expired or revoked')
-      )) {
-        throw new Error(
-          'El refresh_token ha expirado o fue revocado. ' +
-          'Necesitas eliminar token.json y volver a autenticarte manualmente una vez.'
-        );
-      }
-      
-      throw error;
-    }
-  }
-
-  /**
-   * Obtener credenciales del archivo
-   */
-  private async getCredentials(): Promise<CredentialsData> {
-    try {
-      logger.info(`🔍 Buscando credenciales en: ${this.credentialsPath}`);
-      
-      // Verificar si el archivo existe antes de leerlo
-      const fsSync = require('fs');
-      if (!fsSync.existsSync(this.credentialsPath)) {
-        logger.error(`❌ Archivo de credenciales no encontrado en: ${this.credentialsPath}`);
-        throw new Error(`Archivo de credenciales no encontrado en: ${this.credentialsPath}`);
-      }
-      
-      // Usar fs.promises.readFile correctamente
-      const credentialsContent = await fs.readFile(this.credentialsPath, { encoding: 'utf-8' });
-      logger.info('✅ Credenciales leídas correctamente');
-      return JSON.parse(credentialsContent);
-    } catch (error: any) {
-      logger.error(`❌ Error leyendo credenciales desde ${this.credentialsPath}:`, error.message);
-      throw new Error(`No se pudieron leer las credenciales: ${error.message}`);
-    }
-  }
-
-  /**
-   * Obtener token del archivo
-   */
-  private async getToken(): Promise<TokenData> {
-    try {
-      const tokenContent = await fs.readFile(this.tokenPath, { encoding: 'utf-8' });
-      return JSON.parse(tokenContent);
-    } catch (error: any) {
-      logger.error(`❌ Error leyendo token desde ${this.tokenPath}:`, error.message);
-      throw new Error('No se pudo leer el token. Necesitas autenticarte primero.');
-    }
-  }
-
-  /**
-   * Autenticación con Google OAuth2 con refresh automático
-   */
-  async authenticate(): Promise<boolean> {
-    try {
-      // Leer credenciales
-      const credentials = await this.getCredentials();
-      
-      let client_secret: string;
-      let client_id: string;
-      let redirect_uris: string[];
-      
-      if (credentials.installed) {
-        ({ client_secret, client_id, redirect_uris } = credentials.installed);
-      } else if (credentials.web) {
-        ({ client_secret, client_id, redirect_uris } = credentials.web);
-      } else {
-        client_secret = credentials.client_secret!;
-        client_id = credentials.client_id!;
-        redirect_uris = credentials.redirect_uris || (credentials.redirect_uri ? [credentials.redirect_uri] : []);
-      }
-
-      // Crear cliente OAuth2
-      const oAuth2Client = new google.auth.OAuth2(
-        client_id,
-        client_secret,
-        redirect_uris[0]
-      );
-
-      // Leer token
-      const token = await this.getToken();
-      oAuth2Client.setCredentials(token);
-
-      // Configurar listener para guardar tokens renovados automáticamente
-      oAuth2Client.on('tokens', async (tokens: any) => {
-        try {
-          const currentCredentials = oAuth2Client.credentials as TokenData;
-          
-          // Combinar tokens nuevos con el refresh_token existente
-          const updatedToken: TokenData = {
-            ...currentCredentials,
-            ...tokens,
-            // Mantener el refresh_token original si existe
-            refresh_token: currentCredentials.refresh_token || tokens.refresh_token || token.refresh_token
-          };
-
-          await this.saveToken(updatedToken);
-          logger.info('🔄 Token renovado automáticamente por listener y guardado');
-        } catch (error: any) {
-          logger.error('⚠️ Error guardando token desde listener:', error);
-        }
-      });
-
-      // Renovar token si es necesario antes de usarlo
-      await this.refreshTokenIfNeeded(oAuth2Client);
-
-      this.auth = oAuth2Client;
-      this.sheets = google.sheets({ version: 'v4', auth: oAuth2Client });
-
-      return true;
-    } catch (error: any) {
-      logger.error('❌ Error en autenticación:', error);
-      throw new Error(`No se pudo autenticar con Google Sheets: ${error.message}`);
-    }
-  }
-
-  /**
-   * Ejecutar operación con reintento automático si falla por token
+   * Ejecutar operación asegurando autenticación
    */
   private async executeWithRetry<T>(
     operation: () => Promise<T>,
-    maxRetries: number = 1
+    _maxRetries: number = 1
   ): Promise<T> {
-    let lastError: any;
-    
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        // Asegurar que estamos autenticados y con token válido
-        if (!this.sheets || !this.auth) {
-          await this.authenticate();
-        } else {
-          // Verificar y renovar token si es necesario
-          await this.refreshTokenIfNeeded(this.auth);
-          // Actualizar sheets con el nuevo auth si cambió
-          this.sheets = google.sheets({ version: 'v4', auth: this.auth });
-        }
-
-        // Ejecutar la operación
-        return await operation();
-      } catch (error: any) {
-        lastError = error;
-        const errorMessage = error.message || '';
-        
-        // Si es error de token y aún tenemos intentos, reintentar
-        if (
-          (errorMessage.includes('invalid_grant') ||
-           errorMessage.includes('Token has been expired') ||
-           errorMessage.includes('Request had invalid authentication credentials')) &&
-          attempt < maxRetries
-        ) {
-          logger.info(`🔄 Error de autenticación detectado. Reintentando (intento ${attempt + 1}/${maxRetries + 1})...`);
-          
-          // Limpiar autenticación actual para forzar renovación
-          this.auth = null;
-          this.sheets = null;
-          
-          // Esperar un poco antes de reintentar
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          continue;
-        }
-        
-        // Si no es error de token o ya no hay intentos, lanzar error
-        throw error;
-      }
-    }
-    
-    throw lastError;
+    await this.ensureAuth();
+    return await operation();
   }
 
   /**
